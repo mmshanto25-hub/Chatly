@@ -16,6 +16,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.example.chat.data.model.User
 import java.util.Locale
 
@@ -58,18 +59,7 @@ fun UserSearchScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            if (uiState.isLoading) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-            } else if (uiState.searchResults.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        text = if (uiState.searchQuery.isBlank()) "Type a name to search users" else "No users found",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            } else {
+            IfLoadingOrEmpty(uiState) {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
                     items(uiState.searchResults) { user ->
                         UserItem(
@@ -85,6 +75,24 @@ fun UserSearchScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+fun IfLoadingOrEmpty(uiState: UserSearchUiState, content: @Composable () -> Unit) {
+    if (uiState.isLoading) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+    } else if (uiState.searchResults.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                text = if (uiState.searchQuery.isBlank()) "Type a name to search users" else "No users found",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    } else {
+        content()
     }
 }
 
@@ -106,13 +114,21 @@ fun UserItem(
                 .clip(CircleShape),
             color = MaterialTheme.colorScheme.primaryContainer
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                Text(
-                    text = user.displayName.take(1).uppercase(Locale.getDefault()),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
+            if (user.photoUrl.isNotBlank()) {
+                AsyncImage(
+                    model = user.photoUrl,
+                    contentDescription = "Profile Picture",
+                    modifier = Modifier.fillMaxSize()
                 )
+            } else {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = user.displayName.take(1).uppercase(Locale.getDefault()),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
             }
         }
 

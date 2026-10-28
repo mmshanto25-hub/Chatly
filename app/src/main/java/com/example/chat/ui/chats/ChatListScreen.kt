@@ -20,6 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.example.chat.data.model.Conversation
 import java.util.Calendar
 import java.util.Locale
@@ -109,6 +110,7 @@ fun ChatListScreen(
 
                         ConversationItem(
                             conversation = conversation,
+                            recipientId = recipientId,
                             recipientName = recipientName,
                             onClick = {
                                 onNavToChat(conversation.conversationId, recipientId, recipientName)
@@ -125,6 +127,7 @@ fun ChatListScreen(
 @Composable
 fun ConversationItem(
     conversation: Conversation,
+    recipientId: String,
     recipientName: String,
     onClick: () -> Unit
 ) {
@@ -139,6 +142,8 @@ fun ConversationItem(
         }
     }
 
+    val photoUrl = conversation.participantPhotos[recipientId] ?: ""
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -152,13 +157,21 @@ fun ConversationItem(
                 .clip(CircleShape),
             color = MaterialTheme.colorScheme.primaryContainer
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                Text(
-                    text = recipientName.take(1).uppercase(Locale.getDefault()),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 20.sp,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
+            if (photoUrl.isNotBlank()) {
+                AsyncImage(
+                    model = photoUrl,
+                    contentDescription = "Profile Picture",
+                    modifier = Modifier.fillMaxSize()
                 )
+            } else {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = recipientName.take(1).uppercase(Locale.getDefault()),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 20.sp,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
             }
         }
 
