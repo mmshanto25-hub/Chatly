@@ -6,6 +6,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -19,6 +20,7 @@ fun RegisterScreen(
     onNavMain: () -> Unit,
     onNavLogin: () -> Unit
 ) {
+    val context = LocalContext.current
     var displayName by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -107,7 +109,7 @@ fun RegisterScreen(
             Spacer(modifier = Modifier.height(20.dp))
 
             Button(
-                onClick = { viewModel.register(displayName, email, password, confirmPassword, onNavMain) },
+                onClick = { viewModel.register(context, displayName, email, password, confirmPassword, onNavMain) },
                 enabled = !uiState.isLoading,
                 modifier = Modifier
                     .fillMaxWidth()

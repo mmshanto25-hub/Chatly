@@ -1,6 +1,9 @@
 package com.example.chat.ui.conversation
 
+import android.net.Uri
 import android.text.format.DateFormat
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -10,16 +13,21 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.example.chat.data.model.Message
 import java.util.Calendar
 
@@ -30,9 +38,80 @@ fun ConversationScreen(
     recipientName: String,
     onNavBack: () -> Unit
 ) {
+    val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
     val currentUserId = viewModel.currentUserId
     val listState = rememberLazyListState()
+
+    var showAttachmentDialog by remember { mutableStateOf(false) }
+
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            viewModel.sendMediaMessage(context, uri, "image")
+        }
+    }
+
+    val videoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            viewModel.sendMediaMessage(context, uri, "video")
+        }
+    }
+
+    val audioPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            viewModel.sendMediaMessage(context, uri, "audio")
+        }
+    }
+
+    if (showAttachmentDialog) {
+        AlertDialog(
+            onDismissRequest = { showAttachmentDialog = false },
+            title = { Text("Send Attachment", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(
+                        onClick = {
+                            showAttachmentDialog = false
+                            imagePickerLauncher.launch("image/*")
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("📷 Send Photo", fontSize = 16.sp)
+                    }
+                    TextButton(
+                        onClick = {
+                            showAttachmentDialog = false
+                            videoPickerLauncher.launch("video/*")
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("📹 Send Video", fontSize = 16.sp)
+                    }
+                    TextButton(
+                        onClick = {
+                            showAttachmentDialog = false
+                            audioPickerLauncher.launch("audio/*")
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("🎤 Send Voice / Audio", fontSize = 16.sp)
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showAttachmentDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 
     LaunchedEffect(uiState.messages.size) {
         if (uiState.messages.isNotEmpty()) {
@@ -59,30 +138,45 @@ fun ConversationScreen(
                     .fillMaxWidth()
                     .imePadding()
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    OutlinedTextField(
-                        value = uiState.messageInput,
-                        onValueChange = { viewModel.updateMessageInput(it) },
-                        placeholder = { Text("Type a message...") },
+                Column {
+                    if (uiState.isUploading) {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(2.dp))
+                    }
+                    Row(
                         modifier = Modifier
-                            .weight(1f)
-                            .padding(end = 8.dp),
-                        maxLines = 4,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                        keyboardActions = KeyboardActions(
-                            onSend = { viewModel.sendMessage() }
-                        )
-                    )
-                    IconButton(
-                        onClick = { viewModel.sendMessage() },
-                        colors = IconButtonDefaults.iconButtonColors(containerColor = MaterialTheme.colorScheme.primary)
+                            .fillMaxWidth()
+                            .padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Send, contentDescription = "Send", tint = MaterialTheme.colorScheme.onPrimary)
+                        IconButton(
+                            onClick = { showAttachmentDialog = true }
+                        ) {
+                            Icon(
+                                Icons.Default.Add,
+                                contentDescription = "Attach Media",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        OutlinedTextField(
+                            value = uiState.messageInput,
+                            onValueChange = { viewModel.updateMessageInput(it) },
+                            placeholder = { Text("Type a message...") },
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 4.dp),
+                            maxLines = 4,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                            keyboardActions = KeyboardActions(
+                                onSend = { viewModel.sendMessage() }
+                            )
+                        )
+                        IconButton(
+                            onClick = { viewModel.sendMessage() },
+                            colors = IconButtonDefaults.iconButtonColors(containerColor = MaterialTheme.colorScheme.primary)
+                        ) {
+                            Icon(Icons.Default.Send, contentDescription = "Send", tint = MaterialTheme.colorScheme.onPrimary)
+                        }
                     }
                 }
             }
@@ -148,21 +242,65 @@ fun MessageBubble(
                     )
                 )
                 .background(bubbleColor)
-                .padding(horizontal = 12.dp, vertical = 8.dp)
-                .widthIn(max = 280.dp)
+                .padding(horizontal = 8.dp, vertical = 6.dp)
+                .widthIn(max = 260.dp)
         ) {
             Column {
+                if (message.messageType == "image" && message.attachmentUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = message.attachmentUrl,
+                        contentDescription = "Shared Image",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                } else if (message.messageType == "video" && message.attachmentUrl.isNotBlank()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(150.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surface),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.PlayArrow,
+                            contentDescription = "Play Video",
+                            modifier = Modifier.size(48.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                } else if (message.messageType == "audio" && message.attachmentUrl.isNotBlank()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(4.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.PlayArrow,
+                            contentDescription = "Play Audio",
+                            tint = textColor
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("🎵 Voice Message", color = textColor, fontSize = 14.sp)
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+
                 Text(
                     text = message.text,
                     color = textColor,
-                    fontSize = 15.sp
+                    fontSize = 15.sp,
+                    modifier = Modifier.padding(horizontal = 4.dp)
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = timeString,
                     color = textColor.copy(alpha = 0.7f),
                     fontSize = 10.sp,
-                    modifier = Modifier.align(Alignment.End)
+                    modifier = Modifier.align(Alignment.End).padding(horizontal = 4.dp)
                 )
             }
         }

@@ -59,7 +59,18 @@ fun UserSearchScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            IfLoadingOrEmpty(uiState) {
+            if (uiState.isLoading) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            } else if (uiState.searchResults.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = "No users found",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
                     items(uiState.searchResults) { user ->
                         UserItem(
@@ -75,24 +86,6 @@ fun UserSearchScreen(
                 }
             }
         }
-    }
-}
-
-@Composable
-fun IfLoadingOrEmpty(uiState: UserSearchUiState, content: @Composable () -> Unit) {
-    if (uiState.isLoading) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator()
-        }
-    } else if (uiState.searchResults.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(
-                text = if (uiState.searchQuery.isBlank()) "Type a name to search users" else "No users found",
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    } else {
-        content()
     }
 }
 
