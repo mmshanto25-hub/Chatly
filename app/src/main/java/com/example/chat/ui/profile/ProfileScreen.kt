@@ -1,6 +1,5 @@
 package com.example.chat.ui.profile
 
-import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -19,17 +18,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.example.chat.core.utils.CloudinaryUploader
 import com.example.chat.data.repository.AuthRepository
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
-import kotlinx.coroutines.withContext
-import java.io.OutputStreamWriter
-import java.io.PrintWriter
-import java.net.HttpURLConnection
-import java.net.URL
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,7 +55,7 @@ fun ProfileScreen(
                 isSaving = true
                 saveMessage = "Uploading to Cloudinary..."
                 try {
-                    val downloadUrl = uploadImageToCloudinary(context, uri, cloudinaryCloudName, cloudinaryUploadPreset)
+                    val downloadUrl = CloudinaryUploader.uploadToCloudinary(context, uri, cloudinaryCloudName, cloudinaryUploadPreset)
                     if (downloadUrl != null) {
                         // Update user document
                         val userRef = firestore.collection("users").document(currentUserId)
@@ -258,56 +252,6 @@ fun ProfileScreen(
             ) {
                 Text("Sign Out", fontSize = 16.sp, color = MaterialTheme.colorScheme.onError)
             }
-        }
-    }
-}
-
-suspend fun uploadImageToCloudinary(context: Context, imageUri: Uri, cloudName: String, uploadPreset: String): String? {
-    return withContext(Dispatchers.IO) {
-        try {
-            val inputStream = context.contentResolver.openInputStream(imageUri) ?: return@withContext null
-            val bytes = inputStream.readBytes()
-            inputStream.close()
-
-            val boundary = "Boundary-${System.currentTimeMillis()}"
-            val url = URL("https://api.cloudinary.com/v1_1/$cloudName/image/upload")
-            val connection = url.openConnection() as HttpURLConnection
-            connection.requestMethod = "POST"
-            connection.doOutput = true
-            connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
-
-            val outputStream = connection.outputStream
-            val writer = PrintWriter(OutputStreamWriter(outputStream, "UTF-8"), true)
-
-            // Add upload_preset
-            writer.append("--$boundary\r\n")
-            writer.append("Content-Disposition: form-data; name=\"upload_preset\"\r\n\r\n")
-            writer.append("$uploadPreset\r\n")
-
-            // Add file part
-            writer.append("--$boundary\r\n")
-            writer.append("Content-Disposition: form-data; name=\"file\"; filename=\"profile.jpg\"\r\n")
-            writer.append("Content-Type: image/jpeg\r\n\r\n")
-            writer.flush()
-
-            outputStream.write(bytes)
-            outputStream.flush()
-
-            writer.append("\r\n--$boundary--\r\n")
-            writer.flush()
-            writer.close()
-
-            val responseCode = connection.responseCode
-            if (responseCode == HttpURLConnection.HTTP_OK) {
-                val response = connection.inputStream.bufferedReader().use { it.readText() }
-                val urlRegex = """"secure_url"\s*:\s*"([^"]+)"""".toRegex()
-                val matchResult = urlRegex.find(response)
-                matchResult?.groupValues?.get(1)?.replace("\\/", "/")
-            } else {
-                null
-            }
-        } catch (_: Exception) {
-            null
         }
     }
 }
