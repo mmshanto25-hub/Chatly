@@ -4,10 +4,12 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.chat.core.utils.CloudinaryUploader
+import com.example.chat.data.model.Conversation
 import com.example.chat.data.model.Message
+import com.example.chat.data.model.User
 import com.example.chat.data.repository.AuthRepository
 import com.example.chat.data.repository.ChatRepository
-import com.example.chat.ui.profile.uploadImageToCloudinary
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -15,9 +17,14 @@ import kotlinx.coroutines.tasks.await
 
 data class ConversationUiState(
     val messages: List<Message> = emptyList(),
+    val conversation: Conversation? = null,
+    val recipientPhoto: String = "",
+    val recipientPresence: String = "offline",
+    val recipientLastSeen: Long = 0L,
     val isLoading: Boolean = true,
     val messageInput: String = "",
-    val isUploading: Boolean = false
+    val isUploading: Boolean = false,
+    val uploadProgress: Int = 0
 )
 
 class ConversationViewModel(
@@ -25,6 +32,7 @@ class ConversationViewModel(
 ) : ViewModel() {
     private val authRepository = AuthRepository()
     private val chatRepository = ChatRepository()
+    private val firestore = FirebaseFirestore.getInstance()
 
     val currentUserId: String = authRepository.currentUserId ?: ""
 
@@ -32,11 +40,43 @@ class ConversationViewModel(
     val uiState: StateFlow<ConversationUiState> = _uiState.asStateFlow()
 
     init {
-        loadMessages()
+        loadData()
     }
 
-    private fun loadMessages() {
+    private fun loadData() {
         viewModelScope.launch {
+            // Realtime listener for conversation
+            firestore.collection("conversations").document(conversationId)
+                .addSnapshotListener { doc, _ ->
+                    val conversation = doc?.toObject(Conversation::class.java)
+                    if (conversation != null) {
+                        val recipientId = conversation.participantIds.firstOrNull { it != currentUserId } ?: ""
+                        val recipientPhoto = conversation.participantPhotos[recipientId] ?: ""
+
+                        _uiState.update {
+                            it.copy(
+                                conversation = conversation,
+                                recipientPhoto = recipientPhoto
+                            )
+                        }
+
+                        if (recipientId.isNotBlank()) {
+                            firestore.collection("users").document(recipientId).addSnapshotListener { userDoc, _ ->
+                                val user = userDoc?.toObject(User::class.java)
+                                if (user != null) {
+                                    _uiState.update {
+                                        it.copy(
+                                            recipientPhoto = user.photoUrl.ifBlank { recipientPhoto },
+                                            recipientPresence = user.presence,
+                                            recipientLastSeen = user.lastSeenAt
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
             chatRepository.getMessagesFlow(conversationId).collect { messages ->
                 _uiState.update { it.copy(messages = messages, isLoading = false) }
             }
@@ -45,6 +85,29 @@ class ConversationViewModel(
 
     fun updateMessageInput(input: String) {
         _uiState.update { it.copy(messageInput = input) }
+    }
+
+    fun updateNickname(targetUserId: String, nickname: String) {
+        viewModelScope.launch {
+            try {
+                val trimmed = nickname.trim()
+                firestore.collection("conversations")
+                    .document(conversationId)
+                    .update("nicknames.$targetUserId", trimmed)
+                    .await()
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun updateThemeColor(theme: String) {
+        viewModelScope.launch {
+            try {
+                firestore.collection("conversations")
+                    .document(conversationId)
+                    .update("themeColor", theme)
+                    .await()
+            } catch (_: Exception) {}
+        }
     }
 
     fun sendMessage() {
@@ -57,21 +120,43 @@ class ConversationViewModel(
         }
     }
 
+    fun sendMessageText(text: String) {
+        if (text.isBlank() || currentUserId.isBlank()) return
+        viewModelScope.launch {
+            chatRepository.sendMessage(conversationId, currentUserId, text)
+        }
+    }
+
     fun sendMediaMessage(context: Context, uri: Uri, type: String) {
         if (currentUserId.isBlank()) return
         viewModelScope.launch {
-            _uiState.update { it.copy(isUploading = true) }
+            _uiState.update { it.copy(isUploading = true, uploadProgress = 0) }
             try {
-                val downloadUrl = uploadImageToCloudinary(context, uri, "tmtqcamm", "chatly_unsigned")
+                val downloadUrl = CloudinaryUploader.uploadToCloudinary(
+                    context = context,
+                    imageUri = uri,
+                    cloudName = "tmtqcamm",
+                    uploadPreset = "chatly_unsigned",
+                    onProgress = { percent: Int ->
+                        _uiState.update { it.copy(uploadProgress = percent) }
+                    }
+                )
+
                 if (downloadUrl != null) {
-                    val firestore = FirebaseFirestore.getInstance()
+                    val textSummary = when (type) {
+                        "image" -> "📷 Photo"
+                        "video" -> "📹 Video"
+                        "audio" -> "🎤 Voice message"
+                        "document" -> "📄 Document"
+                        else -> "📎 Attachment"
+                    }
+
                     val msgRef = firestore.collection("conversations")
                         .document(conversationId)
                         .collection("messages")
                         .document()
 
                     val messageId = msgRef.id
-                    val textSummary = if (type == "image") "📷 Photo" else "📹 Video"
                     val message = Message(
                         messageId = messageId,
                         conversationId = conversationId,
@@ -97,7 +182,7 @@ class ConversationViewModel(
                 }
             } catch (_: Exception) {
             } finally {
-                _uiState.update { it.copy(isUploading = false) }
+                _uiState.update { it.copy(isUploading = false, uploadProgress = 0) }
             }
         }
     }

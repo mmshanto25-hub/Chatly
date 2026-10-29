@@ -10,5 +10,10 @@ data class Conversation(
     val updatedAt: Long = System.currentTimeMillis(),
     val lastMessage: String = "",
     val lastMessageAt: Long = System.currentTimeMillis(),
-    val lastMessageSenderId: String = ""
+    val lastMessageSenderId: String = "",
+    val isPinned: Boolean = false,
+    val isArchived: Boolean = false,
+    val isMuted: Boolean = false,
+    val nicknames: Map<String, String> = emptyMap(),
+    val themeColor: String = "blue"
 )

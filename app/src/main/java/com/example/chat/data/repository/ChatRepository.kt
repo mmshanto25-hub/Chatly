@@ -88,7 +88,10 @@ class ChatRepository {
                 updatedAt = System.currentTimeMillis(),
                 lastMessage = "Started a conversation",
                 lastMessageAt = System.currentTimeMillis(),
-                lastMessageSenderId = currentUserId
+                lastMessageSenderId = currentUserId,
+                isPinned = false,
+                isArchived = false,
+                isMuted = false
             )
 
             convRef.set(conversation).await()
@@ -114,7 +117,7 @@ class ChatRepository {
                 }
                 val conversations = snapshot?.documents?.mapNotNull { doc ->
                     doc.toObject(Conversation::class.java)?.copy(conversationId = doc.id)
-                }?.sortedByDescending { it.lastMessageAt } ?: emptyList()
+                }?.sortedWith(compareByDescending<Conversation> { it.isPinned }.thenByDescending { it.lastMessageAt }) ?: emptyList()
                 trySend(conversations)
             }
         awaitClose { listener.remove() }
@@ -144,7 +147,7 @@ class ChatRepository {
         awaitClose { listener.remove() }
     }
 
-    suspend fun sendMessage(conversationId: String, senderId: String, text: String):Result<Unit> {
+    suspend fun sendMessage(conversationId: String, senderId: String, text: String, messageType: String = "text", attachmentUrl: String = ""): Result<Unit> {
         val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
         return try {
             val msgRef = db.collection("conversations")
@@ -158,16 +161,20 @@ class ChatRepository {
                 conversationId = conversationId,
                 senderId = senderId,
                 text = text,
+                messageType = messageType,
+                attachmentUrl = attachmentUrl,
                 createdAt = System.currentTimeMillis()
             )
 
             msgRef.set(message).await()
 
+            val summary = if (messageType == "image") "📷 Photo" else if (messageType == "video") "🎥 Video" else if (messageType == "audio") "🎤 Voice message" else text
+
             db.collection("conversations")
                 .document(conversationId)
                 .update(
                     mapOf(
-                        "lastMessage" to text,
+                        "lastMessage" to summary,
                         "lastMessageAt" to System.currentTimeMillis(),
                         "lastMessageSenderId" to senderId,
                         "updatedAt" to System.currentTimeMillis()
@@ -178,5 +185,23 @@ class ChatRepository {
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    suspend fun togglePin(conversationId: String, currentPinState: Boolean) {
+        try {
+            firestore?.collection("conversations")?.document(conversationId)?.update("isPinned", !currentPinState)?.await()
+        } catch (_: Exception) {}
+    }
+
+    suspend fun toggleArchive(conversationId: String, currentArchiveState: Boolean) {
+        try {
+            firestore?.collection("conversations")?.document(conversationId)?.update("isArchived", !currentArchiveState)?.await()
+        } catch (_: Exception) {}
+    }
+
+    suspend fun toggleMute(conversationId: String, currentMuteState: Boolean) {
+        try {
+            firestore?.collection("conversations")?.document(conversationId)?.update("isMuted", !currentMuteState)?.await()
+        } catch (_: Exception) {}
     }
 }
