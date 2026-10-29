@@ -3,6 +3,7 @@ package com.example.chat.data.repository
 import com.example.chat.data.model.Conversation
 import com.example.chat.data.model.Message
 import com.example.chat.data.model.User
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import kotlinx.coroutines.channels.awaitClose
@@ -35,6 +36,17 @@ class ChatRepository {
         }
     }
 
+    suspend fun getAllUsers(currentUserId: String): List<User> {
+        val db = firestore ?: return emptyList()
+        return try {
+            val snapshot = db.collection("users").get().await()
+            snapshot.documents.mapNotNull { it.toObject(User::class.java) }
+                .filter { it.uid != currentUserId }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
     suspend fun getUser(uid: String): User? {
         val db = firestore ?: return null
         return try {
@@ -55,7 +67,8 @@ class ChatRepository {
             var existingConvId: String? = null
             for (doc in querySnapshot.documents) {
                 val participants = doc.get("participantIds") as? List<*>
-                if (participants != null && participants.contains(recipientId) && participants.size == 2) {
+                val isDirect = doc.getString("type") ?: "direct"
+                if (isDirect == "direct" && participants != null && participants.contains(recipientId) && participants.size == 2) {
                     existingConvId = doc.getString("conversationId") ?: doc.id
                     break
                 }
@@ -101,6 +114,54 @@ class ChatRepository {
         }
     }
 
+    suspend fun createGroupConversation(currentUserId: String, groupName: String, participantUids: List<String>): Result<String> {
+        val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
+        return try {
+            val convRef = db.collection("conversations").document()
+            val conversationId = convRef.id
+
+            val allUids = (participantUids + currentUserId).distinct()
+
+            val namesMap = mutableMapOf<String, String>()
+            val photosMap = mutableMapOf<String, String>()
+
+            for (uid in allUids) {
+                val userDoc = db.collection("users").document(uid).get().await()
+                if (userDoc.exists()) {
+                    val name = userDoc.getString("displayName") ?: "User"
+                    val photo = userDoc.getString("photoUrl") ?: ""
+                    namesMap[uid] = name
+                    photosMap[uid] = photo
+                }
+            }
+
+            val finalGroupName = groupName.trim().ifBlank { "Group Chat" }
+            namesMap["groupName"] = finalGroupName
+
+            val conversation = Conversation(
+                conversationId = conversationId,
+                type = "group",
+                groupName = finalGroupName,
+                participantIds = allUids,
+                participantNames = namesMap,
+                participantPhotos = photosMap,
+                createdAt = System.currentTimeMillis(),
+                updatedAt = System.currentTimeMillis(),
+                lastMessage = "Group created",
+                lastMessageAt = System.currentTimeMillis(),
+                lastMessageSenderId = currentUserId,
+                isPinned = false,
+                isArchived = false,
+                isMuted = false
+            )
+
+            convRef.set(conversation).await()
+            Result.success(conversationId)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     fun getConversationsFlow(userId: String): Flow<List<Conversation>> = callbackFlow {
         val db = firestore
         if (db == null) {
@@ -117,7 +178,10 @@ class ChatRepository {
                 }
                 val conversations = snapshot?.documents?.mapNotNull { doc ->
                     doc.toObject(Conversation::class.java)?.copy(conversationId = doc.id)
-                }?.sortedWith(compareByDescending<Conversation> { it.isPinned }.thenByDescending { it.lastMessageAt }) ?: emptyList()
+                }?.sortedWith(
+                    compareByDescending<Conversation> { it.isPinnedFor(userId) }
+                        .thenByDescending { it.lastMessageAt }
+                ) ?: emptyList()
                 trySend(conversations)
             }
         awaitClose { listener.remove() }
@@ -187,21 +251,117 @@ class ChatRepository {
         }
     }
 
-    suspend fun togglePin(conversationId: String, currentPinState: Boolean) {
+    suspend fun togglePin(conversationId: String, userId: String, currentPinState: Boolean) {
+        val db = firestore ?: return
         try {
-            firestore?.collection("conversations")?.document(conversationId)?.update("isPinned", !currentPinState)?.await()
+            val newPinState = !currentPinState
+            if (newPinState) {
+                db.collection("conversations").document(conversationId).update(
+                    mapOf(
+                        "pinnedBy" to FieldValue.arrayUnion(userId),
+                        "isPinned" to true
+                    )
+                ).await()
+            } else {
+                db.collection("conversations").document(conversationId).update(
+                    mapOf(
+                        "pinnedBy" to FieldValue.arrayRemove(userId),
+                        "isPinned" to false
+                    )
+                ).await()
+            }
         } catch (_: Exception) {}
     }
 
-    suspend fun toggleArchive(conversationId: String, currentArchiveState: Boolean) {
+    suspend fun toggleArchive(conversationId: String, userId: String, currentArchiveState: Boolean) {
+        val db = firestore ?: return
         try {
-            firestore?.collection("conversations")?.document(conversationId)?.update("isArchived", !currentArchiveState)?.await()
+            val newArchiveState = !currentArchiveState
+            if (newArchiveState) {
+                db.collection("conversations").document(conversationId).update(
+                    mapOf(
+                        "archivedBy" to FieldValue.arrayUnion(userId),
+                        "isArchived" to true
+                    )
+                ).await()
+            } else {
+                db.collection("conversations").document(conversationId).update(
+                    mapOf(
+                        "archivedBy" to FieldValue.arrayRemove(userId),
+                        "isArchived" to false
+                    )
+                ).await()
+            }
         } catch (_: Exception) {}
     }
 
-    suspend fun toggleMute(conversationId: String, currentMuteState: Boolean) {
+    suspend fun toggleMute(conversationId: String, userId: String, currentMuteState: Boolean) {
+        val db = firestore ?: return
         try {
-            firestore?.collection("conversations")?.document(conversationId)?.update("isMuted", !currentMuteState)?.await()
+            val newMuteState = !currentMuteState
+            if (newMuteState) {
+                db.collection("conversations").document(conversationId).update(
+                    mapOf(
+                        "mutedBy" to FieldValue.arrayUnion(userId),
+                        "isMuted" to true
+                    )
+                ).await()
+            } else {
+                db.collection("conversations").document(conversationId).update(
+                    mapOf(
+                        "mutedBy" to FieldValue.arrayRemove(userId),
+                        "isMuted" to false
+                    )
+                ).await()
+            }
+        } catch (_: Exception) {}
+    }
+
+    suspend fun togglePinMessage(conversationId: String, messageId: String, isCurrentlyPinned: Boolean, messageText: String) {
+        val db = firestore ?: return
+        try {
+            val newPinnedState = !isCurrentlyPinned
+            db.collection("conversations")
+                .document(conversationId)
+                .collection("messages")
+                .document(messageId)
+                .update("isPinned", newPinnedState)
+                .await()
+
+            if (newPinnedState) {
+                db.collection("conversations")
+                    .document(conversationId)
+                    .update(
+                        mapOf(
+                            "pinnedMessageId" to messageId,
+                            "pinnedMessageText" to messageText
+                        )
+                    ).await()
+            } else {
+                val convDoc = db.collection("conversations").document(conversationId).get().await()
+                if (convDoc.getString("pinnedMessageId") == messageId) {
+                    db.collection("conversations")
+                        .document(conversationId)
+                        .update(
+                            mapOf(
+                                "pinnedMessageId" to "",
+                                "pinnedMessageText" to ""
+                            )
+                        ).await()
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    suspend fun deleteMessage(conversationId: String, messageId: String) {
+        val db = firestore ?: return
+        try {
+            db.collection("conversations")
+                .document(conversationId)
+                .collection("messages")
+                .document(messageId)
+                .delete()
+                .await()
         } catch (_: Exception) {}
     }
 }

@@ -93,7 +93,12 @@ fun ChatNavGraph() {
             ConversationScreen(
                 viewModel = conversationViewModel,
                 recipientName = recipientName,
-                onNavBack = { navController.popBackStack() }
+                onNavBack = { navController.popBackStack() },
+                onNavToChat = { convId, recipientId, name ->
+                    navController.navigate("conversation/$convId/$recipientId/$name") {
+                        popUpTo("chats")
+                    }
+                }
             )
         }
         composable("profile") {

@@ -10,8 +10,10 @@ import android.net.Uri
 import android.text.format.DateFormat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -21,8 +23,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
@@ -35,9 +37,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -45,7 +50,9 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import com.example.chat.data.model.Message
+import com.example.chat.data.model.User
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Calendar
 import java.util.Locale
@@ -93,9 +100,12 @@ fun getThemeBackgroundColor(theme: String): Color {
 fun ConversationScreen(
     viewModel: ConversationViewModel,
     recipientName: String,
-    onNavBack: () -> Unit
+    onNavBack: () -> Unit,
+    onNavToChat: ((conversationId: String, recipientId: String, recipientName: String) -> Unit)? = null
 ) {
     val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
+    val coroutineScope = rememberCoroutineScope()
     val uiState by viewModel.uiState.collectAsState()
     val currentUserId = viewModel.currentUserId
     val listState = rememberLazyListState()
@@ -106,12 +116,21 @@ fun ConversationScreen(
     var showMenu by remember { mutableStateOf(false) }
     var showNicknameDialog by remember { mutableStateOf(false) }
     var showThemeDialog by remember { mutableStateOf(false) }
+    var showCreateGroupDialog by remember { mutableStateOf(false) }
+    var availableUsersForGroup by remember { mutableStateOf<List<User>>(emptyList()) }
+    var isFetchingUsers by remember { mutableStateOf(false) }
+    var selectedMessageForMenu by remember { mutableStateOf<Message?>(null) }
 
     val sheetState = rememberModalBottomSheetState()
 
-    val recipientId = uiState.conversation?.participantIds?.firstOrNull { it != currentUserId } ?: ""
-    val customNickname = uiState.conversation?.nicknames?.get(recipientId) ?: ""
-    val displayName = customNickname.ifBlank { recipientName }
+    val conversation = uiState.conversation
+    val recipientId = conversation?.participantIds?.firstOrNull { it != currentUserId } ?: ""
+    val customNickname = conversation?.nicknames?.get(recipientId) ?: ""
+    val displayName = if (conversation?.type == "group") {
+        conversation.getTitle(currentUserId)
+    } else {
+        customNickname.ifBlank { recipientName }
+    }
     val themeColor = uiState.conversation?.themeColor ?: "blue"
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -296,6 +315,193 @@ fun ConversationScreen(
         )
     }
 
+    // Create Group Dialog
+    if (showCreateGroupDialog) {
+        var groupNameInput by remember { mutableStateOf("Group with $displayName") }
+        val selectedUserIds = remember { mutableStateListOf<String>() }
+
+        AlertDialog(
+            onDismissRequest = { showCreateGroupDialog = false },
+            title = { Text("Create Group", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 380.dp)
+                ) {
+                    OutlinedTextField(
+                        value = groupNameInput,
+                        onValueChange = { groupNameInput = it },
+                        label = { Text("Group Name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = "Included Members:",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        AssistChip(onClick = {}, label = { Text("You") })
+                        AssistChip(onClick = {}, label = { Text(displayName) })
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = "Add more members:",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    if (isFetchingUsers) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(100.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(28.dp))
+                        }
+                    } else if (availableUsersForGroup.isEmpty()) {
+                        Text(
+                            text = "No other users found.",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 12.dp)
+                        )
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f, fill = false)
+                        ) {
+                            items(availableUsersForGroup) { user ->
+                                val isSelected = selectedUserIds.contains(user.uid)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            if (isSelected) {
+                                                selectedUserIds.remove(user.uid)
+                                            } else {
+                                                selectedUserIds.add(user.uid)
+                                            }
+                                        }
+                                        .padding(vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Checkbox(
+                                        checked = isSelected,
+                                        onCheckedChange = { checked ->
+                                            if (checked) {
+                                                selectedUserIds.add(user.uid)
+                                            } else {
+                                                selectedUserIds.remove(user.uid)
+                                            }
+                                        }
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Column {
+                                        Text(
+                                            text = user.displayName,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 14.sp
+                                        )
+                                        Text(
+                                            text = user.email,
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val gName = groupNameInput.ifBlank { "Group with $displayName" }
+                        viewModel.createGroup(gName, selectedUserIds.toList()) { newGroupConvId, finalGroupName ->
+                            showCreateGroupDialog = false
+                            onNavToChat?.invoke(newGroupConvId, "group", finalGroupName)
+                        }
+                    }
+                ) {
+                    Text("Create Group")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCreateGroupDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Message Options Dialog
+    if (selectedMessageForMenu != null) {
+        val msg = selectedMessageForMenu!!
+        val isPinned = msg.isPinned
+        AlertDialog(
+            onDismissRequest = { selectedMessageForMenu = null },
+            title = { Text("Message Options", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(
+                        onClick = {
+                            viewModel.togglePinMessage(msg.messageId, msg.text, isPinned)
+                            selectedMessageForMenu = null
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(if (isPinned) "📌 Unpin Message" else "📌 Pin Message", fontSize = 16.sp)
+                    }
+                    if (msg.text.isNotBlank()) {
+                        TextButton(
+                            onClick = {
+                                clipboardManager.setText(AnnotatedString(msg.text))
+                                selectedMessageForMenu = null
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("📋 Copy Text", fontSize = 16.sp)
+                        }
+                    }
+                    if (msg.senderId == currentUserId) {
+                        TextButton(
+                            onClick = {
+                                viewModel.deleteMessage(msg.messageId)
+                                selectedMessageForMenu = null
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("🗑️ Delete Message", fontSize = 16.sp, color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { selectedMessageForMenu = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     LaunchedEffect(uiState.messages.size) {
         if (uiState.messages.isNotEmpty()) {
             listState.animateScrollToItem(uiState.messages.size - 1)
@@ -341,7 +547,7 @@ fun ConversationScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
@@ -367,6 +573,18 @@ fun ConversationScreen(
                             onClick = {
                                 showMenu = false
                                 showThemeDialog = true
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("👥 Create a group with $displayName") },
+                            onClick = {
+                                showMenu = false
+                                showCreateGroupDialog = true
+                                isFetchingUsers = true
+                                viewModel.fetchAvailableUsers { users ->
+                                    availableUsersForGroup = users.filter { it.uid != recipientId }
+                                    isFetchingUsers = false
+                                }
                             }
                         )
                     }
@@ -398,6 +616,7 @@ fun ConversationScreen(
                             )
                         }
                     }
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -439,73 +658,140 @@ fun ConversationScreen(
             }
         }
     ) { padding ->
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .background(getThemeBackgroundColor(themeColor))
                 .padding(padding)
                 .consumeWindowInsets(padding)
         ) {
-            if (uiState.isLoading) {
-                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-            } else if (uiState.messages.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
+            val pinnedMsgText = uiState.conversation?.pinnedMessageText ?: ""
+            val pinnedMsgId = uiState.conversation?.pinnedMessageId ?: ""
+
+            if (pinnedMsgText.isNotBlank()) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            if (pinnedMsgId.isNotBlank()) {
+                                val targetIndex = uiState.messages.indexOfFirst { it.messageId == pinnedMsgId }
+                                if (targetIndex >= 0) {
+                                    coroutineScope.launch {
+                                        listState.animateScrollToItem(targetIndex)
+                                    }
+                                }
+                            }
+                        },
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    tonalElevation = 2.dp
                 ) {
-                    Card(
-                        modifier = Modifier.padding(32.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "No messages here yet...",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Send a message or greeting below to start conversation.",
-                                fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Text("📌", fontSize = 16.sp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text("Pinned Message", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                Text(
+                                    text = pinnedMsgText,
+                                    fontSize = 13.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                            }
+                        }
+                        IconButton(
+                            onClick = {
+                                if (pinnedMsgId.isNotBlank()) {
+                                    viewModel.togglePinMessage(pinnedMsgId, pinnedMsgText, true)
+                                }
+                            },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Unpin", modifier = Modifier.size(18.dp))
                         }
                     }
                 }
-            } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(vertical = 12.dp)
-                ) {
-                    items(uiState.messages) { message ->
-                        val isMe = message.senderId == currentUserId
-                        MessageBubble(
-                            message = message,
-                            isMe = isMe,
-                            themeColor = themeColor,
-                            onImageClick = { url -> fullScreenImageUrl = url },
-                            onVideoClick = { videoUrl ->
-                                try {
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(videoUrl)).apply {
-                                        setDataAndType(Uri.parse(videoUrl), "video/*")
-                                    }
-                                    context.startActivity(intent)
-                                } catch (_: Exception) {
-                                    try {
-                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(videoUrl))
-                                        context.startActivity(intent)
-                                    } catch (_: Exception) {}
-                                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+            ) {
+                if (uiState.isLoading) {
+                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                } else if (uiState.messages.isEmpty()) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Card(
+                            modifier = Modifier.padding(32.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "No messages here yet...",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Send a message or greeting below to start conversation.",
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
-                        )
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(vertical = 12.dp)
+                    ) {
+                        items(uiState.messages) { message ->
+                            val isMe = message.senderId == currentUserId
+                            MessageBubble(
+                                message = message,
+                                isMe = isMe,
+                                themeColor = themeColor,
+                                onImageClick = { url -> fullScreenImageUrl = url },
+                                onVideoClick = { videoUrl ->
+                                    try {
+                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(videoUrl)).apply {
+                                            setDataAndType(Uri.parse(videoUrl), "video/*")
+                                        }
+                                        context.startActivity(intent)
+                                    } catch (_: Exception) {
+                                        try {
+                                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(videoUrl))
+                                            context.startActivity(intent)
+                                        } catch (_: Exception) {}
+                                    }
+                                },
+                                onLongClick = {
+                                    selectedMessageForMenu = message
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -728,13 +1014,15 @@ fun VoiceMessagePlayer(audioUrl: String, textColor: Color) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MessageBubble(
     message: Message,
     isMe: Boolean,
     themeColor: String,
     onImageClick: (String) -> Unit,
-    onVideoClick: (String) -> Unit
+    onVideoClick: (String) -> Unit,
+    onLongClick: () -> Unit
 ) {
     val bubbleColor = getThemeBubbleColor(themeColor, isMe)
     val textColor = if (themeColor == "dark") Color.White else Color.DarkGray
@@ -762,10 +1050,30 @@ fun MessageBubble(
                     )
                 )
                 .background(bubbleColor)
+                .combinedClickable(
+                    onClick = {},
+                    onLongClick = onLongClick
+                )
                 .padding(if (isMedia) 4.dp else 10.dp)
                 .widthIn(max = 260.dp)
         ) {
             Column {
+                if (message.isPinned) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    ) {
+                        Text("📌", fontSize = 12.sp)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            "Pinned",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = textColor.copy(alpha = 0.8f)
+                        )
+                    }
+                }
+
                 if (message.messageType == "image" && message.attachmentUrl.isNotBlank()) {
                     AsyncImage(
                         model = message.attachmentUrl,
