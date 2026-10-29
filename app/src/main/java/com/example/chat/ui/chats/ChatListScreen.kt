@@ -2,6 +2,7 @@ package com.example.chat.ui.chats
 
 import android.text.format.DateFormat
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -9,6 +10,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
@@ -19,6 +21,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -71,6 +74,13 @@ fun ChatListScreen(
                         )
                     }
                 },
+                navigationIcon = {
+                    if (uiState.showArchived) {
+                        IconButton(onClick = { viewModel.toggleShowArchived() }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to Inbox")
+                        }
+                    }
+                },
                 actions = {
                     if (isSearching) {
                         IconButton(onClick = {
@@ -83,8 +93,20 @@ fun ChatListScreen(
                         IconButton(onClick = { isSearching = true }) {
                             Icon(Icons.Default.Search, contentDescription = "Search Chats")
                         }
+                        val userPhoto = uiState.currentUser?.photoUrl ?: ""
                         IconButton(onClick = onNavToProfile) {
-                            Icon(Icons.Default.Person, contentDescription = "Profile")
+                            if (userPhoto.isNotBlank()) {
+                                AsyncImage(
+                                    model = userPhoto,
+                                    contentDescription = "Profile",
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(CircleShape),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Icon(Icons.Default.Person, contentDescription = "Profile")
+                            }
                         }
                         IconButton(onClick = { showMenu = true }) {
                             Icon(Icons.Default.MoreVert, contentDescription = "More Options")
@@ -207,14 +229,15 @@ fun ChatListScreen(
                             key = { it.conversationId }
                         ) { conversation ->
                             val recipientId = conversation.participantIds.firstOrNull { it != currentUserId } ?: ""
-                            val recipientName = conversation.participantNames[recipientId] ?: "Chat Partner"
+                            val title = conversation.getTitle(currentUserId)
 
                             ConversationItem(
                                 conversation = conversation,
                                 recipientId = recipientId,
-                                recipientName = recipientName,
+                                recipientName = title,
+                                currentUserId = currentUserId,
                                 onClick = {
-                                    onNavToChat(conversation.conversationId, recipientId, recipientName)
+                                    onNavToChat(conversation.conversationId, recipientId, title)
                                 },
                                 onLongClick = {
                                     selectedConversationForMenu = conversation
@@ -231,6 +254,10 @@ fun ChatListScreen(
     // Long-press Action Menu Dialog
     if (selectedConversationForMenu != null) {
         val conv = selectedConversationForMenu!!
+        val isPinned = conv.isPinnedFor(currentUserId)
+        val isArchived = conv.isArchivedFor(currentUserId)
+        val isMuted = conv.isMutedFor(currentUserId)
+
         AlertDialog(
             onDismissRequest = { selectedConversationForMenu = null },
             title = { Text("Conversation Options", fontWeight = FontWeight.Bold) },
@@ -238,30 +265,30 @@ fun ChatListScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     TextButton(
                         onClick = {
-                            viewModel.togglePin(conv.conversationId, conv.isPinned)
+                            viewModel.togglePin(conv.conversationId, isPinned)
                             selectedConversationForMenu = null
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(if (conv.isPinned) "📌 Unpin Conversation" else "📌 Pin Conversation", fontSize = 16.sp)
+                        Text(if (isPinned) "📌 Unpin Conversation" else "📌 Pin Conversation", fontSize = 16.sp)
                     }
                     TextButton(
                         onClick = {
-                            viewModel.toggleArchive(conv.conversationId, conv.isArchived)
+                            viewModel.toggleArchive(conv.conversationId, isArchived)
                             selectedConversationForMenu = null
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(if (conv.isArchived) "📂 Unarchive Conversation" else "📂 Archive Conversation", fontSize = 16.sp)
+                        Text(if (isArchived) "📂 Unarchive Conversation" else "📂 Archive Conversation", fontSize = 16.sp)
                     }
                     TextButton(
                         onClick = {
-                            viewModel.toggleMute(conv.conversationId, conv.isMuted)
+                            viewModel.toggleMute(conv.conversationId, isMuted)
                             selectedConversationForMenu = null
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(if (conv.isMuted) "🔔 Unmute Notifications" else "🔕 Mute Notifications", fontSize = 16.sp)
+                        Text(if (isMuted) "🔔 Unmute Notifications" else "🔕 Mute Notifications", fontSize = 16.sp)
                     }
                 }
             },
@@ -281,6 +308,7 @@ fun ConversationItem(
     conversation: Conversation,
     recipientId: String,
     recipientName: String,
+    currentUserId: String,
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
@@ -296,6 +324,8 @@ fun ConversationItem(
     }
 
     val photoUrl = conversation.participantPhotos[recipientId] ?: ""
+    val isPinned = conversation.isPinnedFor(currentUserId)
+    val isMuted = conversation.isMutedFor(currentUserId)
 
     Row(
         modifier = Modifier
@@ -319,6 +349,13 @@ fun ConversationItem(
                     contentDescription = "Profile Picture",
                     modifier = Modifier.fillMaxSize()
                 )
+            } else if (conversation.type == "group") {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = "👥",
+                        fontSize = 22.sp
+                    )
+                }
             } else {
                 Box(contentAlignment = Alignment.Center) {
                     Text(
@@ -346,11 +383,11 @@ fun ConversationItem(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false)
                 )
-                if (conversation.isPinned) {
+                if (isPinned) {
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("📌", fontSize = 12.sp)
                 }
-                if (conversation.isMuted) {
+                if (isMuted) {
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("🔕", fontSize = 12.sp)
                 }

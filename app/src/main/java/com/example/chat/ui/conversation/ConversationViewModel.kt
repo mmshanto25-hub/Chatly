@@ -127,6 +127,37 @@ class ConversationViewModel(
         }
     }
 
+    fun togglePinMessage(messageId: String, messageText: String, isCurrentlyPinned: Boolean) {
+        viewModelScope.launch {
+            chatRepository.togglePinMessage(conversationId, messageId, isCurrentlyPinned, messageText)
+        }
+    }
+
+    fun deleteMessage(messageId: String) {
+        viewModelScope.launch {
+            chatRepository.deleteMessage(conversationId, messageId)
+        }
+    }
+
+    fun fetchAvailableUsers(onResult: (List<User>) -> Unit) {
+        viewModelScope.launch {
+            val users = chatRepository.getAllUsers(currentUserId)
+            onResult(users)
+        }
+    }
+
+    fun createGroup(groupName: String, selectedUserIds: List<String>, onCreated: (groupConvId: String, groupName: String) -> Unit) {
+        val conv = uiState.value.conversation
+        val currentParticipants = conv?.participantIds ?: listOf(currentUserId)
+        val allParticipants = (currentParticipants + selectedUserIds).distinct()
+        viewModelScope.launch {
+            val result = chatRepository.createGroupConversation(currentUserId, groupName, allParticipants)
+            result.getOrNull()?.let { newConvId ->
+                onCreated(newConvId, groupName)
+            }
+        }
+    }
+
     fun sendMediaMessage(context: Context, uri: Uri, type: String) {
         if (currentUserId.isBlank()) return
         viewModelScope.launch {

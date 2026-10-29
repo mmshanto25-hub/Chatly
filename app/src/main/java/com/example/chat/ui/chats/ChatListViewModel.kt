@@ -71,9 +71,9 @@ class ChatListViewModel : ViewModel() {
 
     private fun applyFilter(conversations: List<Conversation>, filter: String, showArchived: Boolean, query: String): List<Conversation> {
         val base = if (showArchived) {
-            conversations.filter { it.isArchived }
+            conversations.filter { it.isArchivedFor(currentUserId) }
         } else {
-            conversations.filter { !it.isArchived }
+            conversations.filter { !it.isArchivedFor(currentUserId) }
         }
 
         val filteredByType = when (filter) {
@@ -94,19 +94,19 @@ class ChatListViewModel : ViewModel() {
 
     fun togglePin(conversationId: String, currentPin: Boolean) {
         viewModelScope.launch {
-            chatRepository.togglePin(conversationId, currentPin)
+            chatRepository.togglePin(conversationId, currentUserId, currentPin)
         }
     }
 
     fun toggleArchive(conversationId: String, currentArchive: Boolean) {
         viewModelScope.launch {
-            chatRepository.toggleArchive(conversationId, currentArchive)
+            chatRepository.toggleArchive(conversationId, currentUserId, currentArchive)
         }
     }
 
     fun toggleMute(conversationId: String, currentMute: Boolean) {
         viewModelScope.launch {
-            chatRepository.toggleMute(conversationId, currentMute)
+            chatRepository.toggleMute(conversationId, currentUserId, currentMute)
         }
     }
 
