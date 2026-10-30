@@ -7,10 +7,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,6 +23,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.example.chat.core.utils.CloudinaryUploader
 import com.example.chat.data.repository.AuthRepository
@@ -43,11 +47,13 @@ fun ProfileScreen(
     val currentUserId = authRepository.currentUserId ?: ""
     var userEmail by remember { mutableStateOf(authRepository.currentUserEmail ?: "") }
     var displayName by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf("") }
     var photoUrl by remember { mutableStateOf("") }
     var profilePictures by remember { mutableStateOf<List<String>>(emptyList()) }
     var isGridView by remember { mutableStateOf(true) }
     var isSaving by remember { mutableStateOf(false) }
     var saveMessage by remember { mutableStateOf<String?>(null) }
+    var fullScreenImageIndex by remember { mutableStateOf<Int?>(null) }
 
     // Cloudinary Configuration
     val cloudinaryCloudName = "tmtqcamm"
@@ -133,23 +139,20 @@ fun ProfileScreen(
         val user = authRepository.getCurrentUserData()
         if (user != null) {
             displayName = user.displayName.ifBlank { "Talky User" }
+            username = user.username.ifBlank { user.email.substringBefore("@") }
             userEmail = user.email
             photoUrl = user.photoUrl
             profilePictures = (listOf(user.photoUrl) + user.profilePictures).filter { it.isNotBlank() }.distinct()
         } else {
             displayName = "Talky User"
+            username = "user"
         }
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Profile", fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onNavBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
-                    }
-                },
+                title = { Text(if (username.isNotBlank()) username else "Profile", fontWeight = FontWeight.Bold) },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
             )
         }
@@ -164,7 +167,6 @@ fun ProfileScreen(
             item {
                 Spacer(modifier = Modifier.height(12.dp))
                 
-                // Profile Picture Avatar (Clickable to change)
                 Box(
                     modifier = Modifier
                         .size(100.dp)
@@ -215,6 +217,16 @@ fun ProfileScreen(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 OutlinedTextField(
+                    value = username,
+                    onValueChange = { username = it; saveMessage = null },
+                    label = { Text("Username") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                OutlinedTextField(
                     value = userEmail,
                     onValueChange = {},
                     label = { Text("Email Address") },
@@ -236,6 +248,7 @@ fun ProfileScreen(
                 Button(
                     onClick = {
                         val newName = displayName.trim()
+                        val newUsername = username.trim().removePrefix("@")
                         if (currentUserId.isNotBlank() && newName.isNotBlank()) {
                             scope.launch {
                                 isSaving = true
@@ -244,6 +257,7 @@ fun ProfileScreen(
                                     val userData = mapOf(
                                         "uid" to currentUserId,
                                         "displayName" to newName,
+                                        "username" to newUsername,
                                         "email" to userEmail,
                                         "photoUrl" to photoUrl
                                     )
@@ -262,6 +276,7 @@ fun ProfileScreen(
                                         batch.commit().await()
                                     }
 
+                                    username = newUsername
                                     saveMessage = "Profile updated successfully!"
                                 } catch (e: Exception) {
                                     saveMessage = "Failed to update: ${e.localizedMessage}"
@@ -283,7 +298,6 @@ fun ProfileScreen(
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                // Gallery Header with View Toggle Buttons (Grid vs List)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -352,12 +366,13 @@ fun ProfileScreen(
                         ) {
                             for (imgUrl in rowImages) {
                                 val isSelected = (imgUrl == photoUrl)
+                                val originalIndex = profilePictures.indexOf(imgUrl)
                                 Box(
                                     modifier = Modifier
                                         .weight(1f)
                                         .aspectRatio(1f)
                                         .clip(RoundedCornerShape(8.dp))
-                                        .clickable { setAsCurrentProfile(imgUrl) },
+                                        .clickable { fullScreenImageIndex = originalIndex },
                                     contentAlignment = Alignment.TopEnd
                                 ) {
                                     AsyncImage(
@@ -391,11 +406,12 @@ fun ProfileScreen(
                 } else {
                     items(profilePictures) { imgUrl ->
                         val isSelected = (imgUrl == photoUrl)
+                        val originalIndex = profilePictures.indexOf(imgUrl)
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 6.dp)
-                                .clickable { setAsCurrentProfile(imgUrl) },
+                                .clickable { fullScreenImageIndex = originalIndex },
                             shape = RoundedCornerShape(12.dp),
                             colors = CardDefaults.cardColors(
                                 containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
@@ -427,7 +443,7 @@ fun ProfileScreen(
                                             fontSize = 14.sp
                                         )
                                         Text(
-                                            text = "Tap to set as current",
+                                            text = "Tap to view full screen",
                                             fontSize = 12.sp,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -438,6 +454,78 @@ fun ProfileScreen(
                                         Text("Active")
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (fullScreenImageIndex != null && profilePictures.isNotEmpty()) {
+        val pagerState = rememberPagerState(initialPage = fullScreenImageIndex!!) { profilePictures.size }
+        Dialog(
+            onDismissRequest = { fullScreenImageIndex = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.background
+            ) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    HorizontalPager(
+                        state = pagerState,
+                        modifier = Modifier.fillMaxSize()
+                    ) { pageIndex ->
+                        val imgUrl = profilePictures[pageIndex]
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            AsyncImage(
+                                model = imgUrl,
+                                contentDescription = "Fullscreen Profile Picture",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Fit
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp)
+                            .align(Alignment.TopCenter),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = { fullScreenImageIndex = null }) {
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = MaterialTheme.colorScheme.onBackground)
+                        }
+
+                        val currentImageUrl = profilePictures[pagerState.currentPage]
+                        val isActive = (currentImageUrl == photoUrl)
+                        if (isActive) {
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.primary
+                            ) {
+                                Text(
+                                    text = "Active Profile",
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        } else {
+                            Button(
+                                onClick = {
+                                    setAsCurrentProfile(currentImageUrl)
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                            ) {
+                                Text("Set as Active Profile")
                             }
                         }
                     }

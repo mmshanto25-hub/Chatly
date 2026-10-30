@@ -139,7 +139,7 @@ fun LoginScreen(
             OutlinedTextField(
                 value = email,
                 onValueChange = { email = it; viewModel.clearError() },
-                label = { Text("Email Address") },
+                label = { Text("Email Address / Username") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
                 modifier = Modifier.fillMaxWidth()
@@ -186,8 +186,13 @@ fun LoginScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            TextButton(onClick = onNavRegister) {
-                Text("Don't have an account? Register here")
+            OutlinedButton(
+                onClick = onNavRegister,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp)
+            ) {
+                Text("Don't have an account? Register here", fontSize = 15.sp, fontWeight = FontWeight.Bold)
             }
         }
     }

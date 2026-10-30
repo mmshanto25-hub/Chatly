@@ -63,6 +63,11 @@ fun ChatNavGraph() {
                     navController.navigate("login") {
                         popUpTo("chats") { inclusive = true }
                     }
+                },
+                onSwitchAccount = {
+                    navController.navigate("chats") {
+                        popUpTo(0) { inclusive = true }
+                    }
                 }
             )
         }
@@ -108,7 +113,12 @@ fun ChatNavGraph() {
         }
         composable("settings") {
             SettingsScreen(
-                onNavBack = { navController.popBackStack() }
+                onNavBack = { navController.popBackStack() },
+                onNavToLogin = {
+                    navController.navigate("login") {
+                        popUpTo(0) { inclusive = true }
+                    }
+                }
             )
         }
     }

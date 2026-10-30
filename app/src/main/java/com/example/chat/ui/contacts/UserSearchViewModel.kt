@@ -35,7 +35,11 @@ class UserSearchViewModel : ViewModel() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
             try {
-                val snapshot = firestore.collection("users").get().await()
+                val snapshot = try {
+                    firestore.collection("users").get(com.google.firebase.firestore.Source.SERVER).await()
+                } catch (_: Exception) {
+                    firestore.collection("users").get().await()
+                }
                 val users = snapshot.documents.mapNotNull { it.toObject(User::class.java) }
                     .filter { it.uid != currentUserId }
                 _uiState.update { it.copy(allUsers = users, searchResults = users, isLoading = false) }
@@ -63,6 +67,15 @@ class UserSearchViewModel : ViewModel() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
             try {
+                val recipientDoc = try {
+                    firestore.collection("users").document(recipient.uid).get(com.google.firebase.firestore.Source.SERVER).await()
+                } catch (_: Exception) {
+                    firestore.collection("users").document(recipient.uid).get().await()
+                }
+                if (!recipientDoc.exists()) {
+                    _uiState.update { it.copy(isLoading = false, errorMessage = "This user has been deleted and cannot be messaged.") }
+                    return@launch
+                }
                 val querySnapshot = firestore.collection("conversations")
                     .whereArrayContains("participantIds", currentUserId)
                     .get()

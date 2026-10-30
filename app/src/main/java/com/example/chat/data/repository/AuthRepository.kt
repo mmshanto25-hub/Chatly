@@ -37,16 +37,28 @@ class AuthRepository {
         }
     }
 
-    suspend fun register(displayName: String, email: String, password: String): Result<Unit> {
+    suspend fun register(displayName: String, emailOrUsername: String, password: String): Result<Unit> {
         val a = auth ?: return Result.failure(Exception("Firebase Auth is not initialized. Please add your google-services.json file."))
         val db = firestore ?: return Result.failure(Exception("Firestore is not initialized. Please add your google-services.json file."))
         return try {
+            val email = if (!emailOrUsername.contains("@")) {
+                "${emailOrUsername.trim()}@talky.com"
+            } else {
+                emailOrUsername.trim()
+            }
+            val username = if (emailOrUsername.contains("@")) {
+                emailOrUsername.substringBefore("@")
+            } else {
+                emailOrUsername.trim()
+            }
+
             val authResult = a.createUserWithEmailAndPassword(email, password).await()
             val uid = authResult.user?.uid ?: throw Exception("User ID is null")
             val user = User(
                 uid = uid,
                 displayName = displayName,
                 email = email,
+                username = username,
                 createdAt = System.currentTimeMillis(),
                 lastSeenAt = System.currentTimeMillis(),
                 presence = "online"
@@ -97,5 +109,36 @@ class AuthRepository {
                 )
             ).await()
         } catch (_: Exception) {}
+    }
+
+    suspend fun deleteAccount(): Result<Unit> {
+        val a = auth ?: return Result.failure(Exception("Firebase Auth is not initialized."))
+        val db = firestore ?: return Result.failure(Exception("Firestore is not initialized."))
+        val uid = currentUserId ?: return Result.failure(Exception("No current user logged in."))
+        return try {
+            db.collection("users").document(uid).delete().await()
+
+            val convQuery = db.collection("conversations")
+                .whereArrayContains("participantIds", uid)
+                .get()
+                .await()
+
+            val batch = db.batch()
+            for (doc in convQuery.documents) {
+                val type = doc.getString("type") ?: "direct"
+                val participants = doc.get("participantIds") as? List<*>
+                if (type == "direct" || participants?.size == 2) {
+                    batch.delete(doc.reference)
+                } else {
+                    batch.update(doc.reference, "participantIds", com.google.firebase.firestore.FieldValue.arrayRemove(uid))
+                }
+            }
+            batch.commit().await()
+
+            a.currentUser?.delete()?.await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 }

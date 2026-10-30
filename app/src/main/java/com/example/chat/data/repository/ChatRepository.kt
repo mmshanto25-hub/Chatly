@@ -14,6 +14,8 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 class ChatRepository {
@@ -26,7 +28,11 @@ class ChatRepository {
     suspend fun searchUsers(query: String, currentUserId: String): List<User> {
         val db = firestore ?: return emptyList()
         return try {
-            val snapshot = db.collection("users").get().await()
+            val snapshot = try {
+                db.collection("users").get(com.google.firebase.firestore.Source.SERVER).await()
+            } catch (_: Exception) {
+                db.collection("users").get().await()
+            }
             val trimmedQuery = query.trim().lowercase(Locale.getDefault())
             snapshot.documents.mapNotNull { it.toObject(User::class.java) }
                 .filter { user ->
@@ -43,7 +49,11 @@ class ChatRepository {
     suspend fun getAllUsers(currentUserId: String): List<User> {
         val db = firestore ?: return emptyList()
         return try {
-            val snapshot = db.collection("users").get().await()
+            val snapshot = try {
+                db.collection("users").get(com.google.firebase.firestore.Source.SERVER).await()
+            } catch (_: Exception) {
+                db.collection("users").get().await()
+            }
             snapshot.documents.mapNotNull { it.toObject(User::class.java) }
                 .filter { it.uid != currentUserId }
         } catch (e: Exception) {
@@ -63,6 +73,15 @@ class ChatRepository {
     suspend fun getOrCreateConversation(currentUserId: String, recipientId: String, recipientName: String, recipientPhoto: String): Result<String> {
         val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
         return try {
+            val recipientDoc = try {
+                db.collection("users").document(recipientId).get(com.google.firebase.firestore.Source.SERVER).await()
+            } catch (_: Exception) {
+                db.collection("users").document(recipientId).get().await()
+            }
+            if (!recipientDoc.exists()) {
+                return Result.failure(Exception("This user has been deleted and cannot be messaged."))
+            }
+
             val querySnapshot = db.collection("conversations")
                 .whereArrayContains("participantIds", currentUserId)
                 .get()
@@ -79,6 +98,9 @@ class ChatRepository {
             }
 
             if (existingConvId != null) {
+                db.collection("conversations").document(existingConvId).update(
+                    "deletedFor", FieldValue.arrayRemove(currentUserId)
+                ).await()
                 return Result.success(existingConvId)
             }
 
@@ -118,7 +140,7 @@ class ChatRepository {
         }
     }
 
-    suspend fun createGroupConversation(currentUserId: String, groupName: String, participantUids: List<String>): Result<String> {
+    suspend fun createGroupConversation(currentUserId: String, groupName: String, participantUids: List<String>, groupPhotoUrl: String = ""): Result<String> {
         val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
         return try {
             val convRef = db.collection("conversations").document()
@@ -141,11 +163,15 @@ class ChatRepository {
 
             val finalGroupName = groupName.trim().ifBlank { "Group Chat" }
             namesMap["groupName"] = finalGroupName
+            if (groupPhotoUrl.isNotBlank()) {
+                photosMap["groupPhoto"] = groupPhotoUrl
+            }
 
             val conversation = Conversation(
                 conversationId = conversationId,
                 type = "group",
                 groupName = finalGroupName,
+                groupPhoto = groupPhotoUrl,
                 participantIds = allUids,
                 participantNames = namesMap,
                 participantPhotos = photosMap,
@@ -180,17 +206,51 @@ class ChatRepository {
                     trySend(emptyList())
                     return@addSnapshotListener
                 }
-                val conversations = snapshot?.documents?.mapNotNull { doc ->
+                val rawConversations = snapshot?.documents?.mapNotNull { doc ->
                     doc.toObject(Conversation::class.java)?.copy(conversationId = doc.id)
-                }?.sortedWith(
-                    compareByDescending<Conversation> { it.isPinnedFor(userId) }
-                        .thenByDescending { it.lastMessageAt }
-                ) ?: emptyList()
+                } ?: emptyList()
+
+                launch {
+                    val usersSnapshot = try {
+                        db.collection("users").get(com.google.firebase.firestore.Source.SERVER).await()
+                    } catch (_: Exception) {
+                        db.collection("users").get().await()
+                    }
+                    val existingUserIds = usersSnapshot?.documents?.map { it.id }?.toSet() ?: emptySet()
+
+                    val validConversations = mutableListOf<Conversation>()
+                    for (conv in rawConversations) {
+                        if (conv.deletedFor.contains(userId)) continue
+                        if (conv.type == "direct") {
+                            val recipientId = conv.participantIds.firstOrNull { it != userId } ?: ""
+                            if (recipientId.isBlank() || existingUserIds.contains(recipientId)) {
+                                validConversations.add(conv)
+                            }
+                        } else {
+                            validConversations.add(conv)
+                        }
+                    }
+
+                    val sortedConvs = validConversations.sortedWith(
+                        compareByDescending<Conversation> { it.isPinnedFor(userId) }
+                            .thenByDescending { it.lastMessageAt }
+                    )
+                    trySend(sortedConvs)
+                }
 
                 for (doc in snapshot?.documentChanges.orEmpty()) {
                     if (doc.type == DocumentChange.Type.MODIFIED || doc.type == DocumentChange.Type.ADDED) {
                         val conv = doc.document.toObject(Conversation::class.java).copy(conversationId = doc.document.id)
                         if (conv.lastMessageSenderId.isNotBlank() && conv.lastMessageSenderId != userId) {
+                            if (conv.deletedFor.contains(userId)) {
+                                launch {
+                                    try {
+                                        db.collection("conversations").document(conv.conversationId).update(
+                                            "deletedFor", FieldValue.arrayRemove(userId)
+                                        ).await()
+                                    } catch (_: Exception) {}
+                                }
+                            }
                             if (conv.conversationId != ActiveChatTracker.activeConversationId) {
                                 val timeDiff = System.currentTimeMillis() - conv.lastMessageAt
                                 if (timeDiff < 20000) {
@@ -209,8 +269,6 @@ class ChatRepository {
                         }
                     }
                 }
-
-                trySend(conversations)
             }
         awaitClose { listener.remove() }
     }
@@ -239,9 +297,34 @@ class ChatRepository {
         awaitClose { listener.remove() }
     }
 
-    suspend fun sendMessage(conversationId: String, senderId: String, text: String, messageType: String = "text", attachmentUrl: String = ""): Result<Unit> {
+    suspend fun sendMessage(
+        conversationId: String,
+        senderId: String,
+        text: String,
+        messageType: String = "text",
+        attachmentUrl: String = "",
+        replyToText: String = "",
+        replyToSenderName: String = ""
+    ): Result<Unit> {
         val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
         return try {
+            val convDoc = db.collection("conversations").document(conversationId).get().await()
+            val participants = convDoc.get("participantIds") as? List<*>
+            val type = convDoc.getString("type") ?: "direct"
+            if (type == "direct" && participants != null) {
+                val recipientId = participants.firstOrNull { it != senderId } as? String
+                if (recipientId != null) {
+                    val recipientDoc = try {
+                        db.collection("users").document(recipientId).get(com.google.firebase.firestore.Source.SERVER).await()
+                    } catch (_: Exception) {
+                        db.collection("users").document(recipientId).get().await()
+                    }
+                    if (!recipientDoc.exists()) {
+                        return Result.failure(Exception("This user has been deleted and cannot be messaged."))
+                    }
+                }
+            }
+
             val msgRef = db.collection("conversations")
                 .document(conversationId)
                 .collection("messages")
@@ -255,7 +338,9 @@ class ChatRepository {
                 text = text,
                 messageType = messageType,
                 attachmentUrl = attachmentUrl,
-                createdAt = System.currentTimeMillis()
+                createdAt = System.currentTimeMillis(),
+                replyToText = replyToText,
+                replyToSenderName = replyToSenderName
             )
 
             msgRef.set(message).await()
@@ -266,6 +351,7 @@ class ChatRepository {
                 .document(conversationId)
                 .update(
                     mapOf(
+                        "deletedFor" to FieldValue.arrayRemove(senderId),
                         "lastMessage" to summary,
                         "lastMessageAt" to System.currentTimeMillis(),
                         "lastMessageSenderId" to senderId,
@@ -342,6 +428,17 @@ class ChatRepository {
                     )
                 ).await()
             }
+        } catch (_: Exception) {}
+    }
+
+    suspend fun deleteConversationForUser(conversationId: String, userId: String) {
+        val db = firestore ?: return
+        try {
+            db.collection("conversations").document(conversationId).update(
+                mapOf(
+                    "deletedFor" to FieldValue.arrayUnion(userId)
+                )
+            ).await()
         } catch (_: Exception) {}
     }
 
