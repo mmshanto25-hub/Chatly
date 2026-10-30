@@ -69,7 +69,7 @@ fun RegisterScreen(
             OutlinedTextField(
                 value = email,
                 onValueChange = { email = it; viewModel.clearError() },
-                label = { Text("Email Address") },
+                label = { Text("Email Address / Username") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
                 modifier = Modifier.fillMaxWidth()
@@ -127,8 +127,13 @@ fun RegisterScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            TextButton(onClick = onNavLogin) {
-                Text("Already have an account? Sign in")
+            OutlinedButton(
+                onClick = onNavLogin,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp)
+            ) {
+                Text("Already have an account? Sign in", fontSize = 15.sp, fontWeight = FontWeight.Bold)
             }
         }
     }

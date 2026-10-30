@@ -7,7 +7,8 @@ import org.json.JSONObject
 data class SavedAccount(
     val email: String,
     val displayName: String,
-    val photoUrl: String
+    val photoUrl: String,
+    val password: String
 )
 
 object SavedAccountManager {
@@ -26,7 +27,8 @@ object SavedAccountManager {
                     SavedAccount(
                         email = obj.getString("email"),
                         displayName = obj.getString("displayName"),
-                        photoUrl = obj.optString("photoUrl", "")
+                        photoUrl = obj.optString("photoUrl", ""),
+                        password = obj.optString("password", "")
                     )
                 )
             }
@@ -34,10 +36,10 @@ object SavedAccountManager {
         return list
     }
 
-    fun saveAccount(context: Context, email: String, displayName: String, photoUrl: String) {
+    fun saveAccount(context: Context, email: String, displayName: String, photoUrl: String, password: String) {
         val accounts = getSavedAccounts(context).toMutableList()
         accounts.removeAll { it.email.equals(email, ignoreCase = true) }
-        accounts.add(0, SavedAccount(email, displayName, photoUrl))
+        accounts.add(0, SavedAccount(email, displayName, photoUrl, password))
 
         val jsonArray = JSONArray()
         for (acc in accounts) {
@@ -45,6 +47,7 @@ object SavedAccountManager {
                 put("email", acc.email)
                 put("displayName", acc.displayName)
                 put("photoUrl", acc.photoUrl)
+                put("password", acc.password)
             }
             jsonArray.put(obj)
         }

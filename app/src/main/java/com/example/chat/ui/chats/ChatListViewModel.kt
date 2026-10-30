@@ -1,7 +1,9 @@
 package com.example.chat.ui.chats
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.chat.data.local.SavedAccountManager
 import com.example.chat.data.model.Conversation
 import com.example.chat.data.model.User
 import com.example.chat.data.repository.AuthRepository
@@ -110,10 +112,35 @@ class ChatListViewModel : ViewModel() {
         }
     }
 
+    fun deleteConversationForUser(conversationId: String) {
+        viewModelScope.launch {
+            chatRepository.deleteConversationForUser(conversationId, currentUserId)
+        }
+    }
+
     fun logout(onLoggedOut: () -> Unit) {
         viewModelScope.launch {
             authRepository.logout()
             onLoggedOut()
+        }
+    }
+
+    fun switchAccount(context: Context, email: String, password: String, onSwitched: () -> Unit, onError: (String) -> Unit) {
+        viewModelScope.launch {
+            val result = authRepository.login(email, password)
+            if (result.isSuccess) {
+                val userData = authRepository.getCurrentUserData()
+                SavedAccountManager.saveAccount(
+                    context,
+                    email,
+                    userData?.displayName ?: email.substringBefore("@"),
+                    userData?.photoUrl ?: "",
+                    password
+                )
+                onSwitched()
+            } else {
+                onError(result.exceptionOrNull()?.localizedMessage ?: "Failed to switch account")
+            }
         }
     }
 }

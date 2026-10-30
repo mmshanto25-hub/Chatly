@@ -24,7 +24,8 @@ data class ConversationUiState(
     val isLoading: Boolean = true,
     val messageInput: String = "",
     val isUploading: Boolean = false,
-    val uploadProgress: Int = 0
+    val uploadProgress: Int = 0,
+    val replyingToMessage: Message? = null
 )
 
 class ConversationViewModel(
@@ -110,13 +111,26 @@ class ConversationViewModel(
         }
     }
 
+    fun setReplyingToMessage(message: Message?) {
+        _uiState.update { it.copy(replyingToMessage = message) }
+    }
+
     fun sendMessage() {
         val text = uiState.value.messageInput.trim()
         if (text.isBlank() || currentUserId.isBlank()) return
 
+        val replyMsg = uiState.value.replyingToMessage
+        val replyText = replyMsg?.text ?: ""
+        val replySenderName = if (replyMsg != null) {
+            val conv = uiState.value.conversation
+            val name = conv?.participantNames?.get(replyMsg.senderId) ?: "User"
+            val nick = conv?.nicknames?.get(replyMsg.senderId) ?: ""
+            if (nick.isNotBlank()) nick else name
+        } else ""
+
         viewModelScope.launch {
-            _uiState.update { it.copy(messageInput = "") }
-            chatRepository.sendMessage(conversationId, currentUserId, text)
+            _uiState.update { it.copy(messageInput = "", replyingToMessage = null) }
+            chatRepository.sendMessage(conversationId, currentUserId, text, replyToText = replyText, replyToSenderName = replySenderName)
         }
     }
 
@@ -146,15 +160,152 @@ class ConversationViewModel(
         }
     }
 
-    fun createGroup(groupName: String, selectedUserIds: List<String>, onCreated: (groupConvId: String, groupName: String) -> Unit) {
+    fun createGroup(groupName: String, selectedUserIds: List<String>, groupPhotoUrl: String = "", onCreated: (groupConvId: String, groupName: String) -> Unit) {
         val conv = uiState.value.conversation
         val currentParticipants = conv?.participantIds ?: listOf(currentUserId)
         val allParticipants = (currentParticipants + selectedUserIds).distinct()
         viewModelScope.launch {
-            val result = chatRepository.createGroupConversation(currentUserId, groupName, allParticipants)
+            val result = chatRepository.createGroupConversation(currentUserId, groupName, allParticipants, groupPhotoUrl)
             result.getOrNull()?.let { newConvId ->
                 onCreated(newConvId, groupName)
             }
+        }
+    }
+
+    fun updateNicknames(recipientId: String, myNickname: String, recipientNickname: String, myName: String, recipientOriginalName: String) {
+        viewModelScope.launch {
+            try {
+                val myTrimmed = myNickname.trim()
+                val recipientTrimmed = recipientNickname.trim()
+
+                val updates = mutableMapOf<String, Any>()
+                if (myTrimmed.isNotBlank()) {
+                    updates["nicknames.$currentUserId"] = myTrimmed
+                }
+                if (recipientTrimmed.isNotBlank() && recipientId.isNotBlank()) {
+                    updates["nicknames.$recipientId"] = recipientTrimmed
+                }
+
+                if (updates.isNotEmpty()) {
+                    firestore.collection("conversations")
+                        .document(conversationId)
+                        .update(updates)
+                        .await()
+
+                    val systemText = buildString {
+                        if (myTrimmed.isNotBlank() && recipientTrimmed.isBlank()) {
+                            append("$myName changed their nickname to $myTrimmed.")
+                        } else if (recipientTrimmed.isNotBlank() && myTrimmed.isBlank()) {
+                            append("$myName changed $recipientOriginalName's nickname to $recipientTrimmed.")
+                        } else if (myTrimmed.isNotBlank() && recipientTrimmed.isNotBlank()) {
+                            append("$myName changed their nickname to $myTrimmed and $recipientOriginalName's nickname to $recipientTrimmed.")
+                        }
+                    }.trim()
+
+                    if (systemText.isNotBlank()) {
+                        chatRepository.sendMessage(
+                            conversationId = conversationId,
+                            senderId = currentUserId,
+                            text = systemText,
+                            messageType = "system"
+                        )
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun addMemberToGroup(userIdToAdd: String, userName: String, userPhoto: String, adminName: String, onAdded: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                firestore.collection("conversations").document(conversationId).update(
+                    mapOf(
+                        "participantIds" to com.google.firebase.firestore.FieldValue.arrayUnion(userIdToAdd),
+                        "participantNames.$userIdToAdd" to userName,
+                        "participantPhotos.$userIdToAdd" to userPhoto
+                    )
+                ).await()
+
+                chatRepository.sendMessage(
+                    conversationId = conversationId,
+                    senderId = currentUserId,
+                    text = "$adminName added $userName to the group.",
+                    messageType = "system"
+                )
+                onAdded()
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun updateGroupMemberNickname(targetUserId: String, targetName: String, nickname: String, adminName: String) {
+        viewModelScope.launch {
+            try {
+                val trimmed = nickname.trim()
+                firestore.collection("conversations")
+                    .document(conversationId)
+                    .update("nicknames.$targetUserId", trimmed)
+                    .await()
+
+                val sysText = if (trimmed.isBlank()) {
+                    "$adminName removed nickname for $targetName."
+                } else {
+                    "$adminName changed $targetName's nickname to $trimmed."
+                }
+                chatRepository.sendMessage(
+                    conversationId = conversationId,
+                    senderId = currentUserId,
+                    text = sysText,
+                    messageType = "system"
+                )
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun updateGroupPhoto(newPhotoUrl: String, adminName: String) {
+        viewModelScope.launch {
+            try {
+                firestore.collection("conversations")
+                    .document(conversationId)
+                    .update(
+                        mapOf(
+                            "groupPhoto" to newPhotoUrl,
+                            "participantPhotos.groupPhoto" to newPhotoUrl
+                        )
+                    )
+                    .await()
+
+                chatRepository.sendMessage(
+                    conversationId = conversationId,
+                    senderId = currentUserId,
+                    text = "$adminName changed the group picture.",
+                    messageType = "system"
+                )
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun updateGroupName(newGroupName: String, adminName: String) {
+        viewModelScope.launch {
+            try {
+                val trimmed = newGroupName.trim()
+                if (trimmed.isBlank()) return@launch
+                firestore.collection("conversations")
+                    .document(conversationId)
+                    .update(
+                        mapOf(
+                            "groupName" to trimmed,
+                            "participantNames.groupName" to trimmed
+                        )
+                    )
+                    .await()
+
+                chatRepository.sendMessage(
+                    conversationId = conversationId,
+                    senderId = currentUserId,
+                    text = "$adminName changed the group name to $trimmed.",
+                    messageType = "system"
+                )
+            } catch (_: Exception) {}
         }
     }
 

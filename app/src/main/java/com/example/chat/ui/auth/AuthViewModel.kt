@@ -25,21 +25,27 @@ class AuthViewModel : ViewModel() {
 
     fun isUserLoggedIn(): Boolean = authRepository.isUserLoggedIn()
 
-    fun login(context: Context, email: String, password: String, onNavMain: () -> Unit) {
+    fun login(context: Context, emailOrUsername: String, password: String, onNavMain: () -> Unit) {
+        val email = if (!emailOrUsername.contains("@")) {
+            "${emailOrUsername.trim()}@talky.com"
+        } else {
+            emailOrUsername.trim()
+        }
         if (email.isBlank() || password.isBlank()) {
             _uiState.update { it.copy(errorMessage = "Please fill in all fields") }
             return
         }
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
-            val result = authRepository.login(email.trim(), password)
+            val result = authRepository.login(email, password)
             if (result.isSuccess) {
                 val userData = authRepository.getCurrentUserData()
                 SavedAccountManager.saveAccount(
                     context,
-                    email.trim(),
+                    email,
                     userData?.displayName ?: email.substringBefore("@"),
-                    userData?.photoUrl ?: ""
+                    userData?.photoUrl ?: "",
+                    password
                 )
                 _uiState.update { it.copy(isLoading = false, isSuccess = true) }
                 onNavMain()
@@ -49,8 +55,8 @@ class AuthViewModel : ViewModel() {
         }
     }
 
-    fun register(context: Context, displayName: String, email: String, password: String, confirmPassword: String, onNavMain: () -> Unit) {
-        if (displayName.isBlank() || email.isBlank() || password.isBlank() || confirmPassword.isBlank()) {
+    fun register(context: Context, displayName: String, emailOrUsername: String, password: String, confirmPassword: String, onNavMain: () -> Unit) {
+        if (displayName.isBlank() || emailOrUsername.isBlank() || password.isBlank() || confirmPassword.isBlank()) {
             _uiState.update { it.copy(errorMessage = "Please fill in all fields") }
             return
         }
@@ -64,13 +70,15 @@ class AuthViewModel : ViewModel() {
         }
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
-            val result = authRepository.register(displayName.trim(), email.trim(), password)
+            val result = authRepository.register(displayName.trim(), emailOrUsername.trim(), password)
             if (result.isSuccess) {
+                val email = if (!emailOrUsername.contains("@")) "${emailOrUsername.trim()}@talky.com" else emailOrUsername.trim()
                 SavedAccountManager.saveAccount(
                     context,
-                    email.trim(),
+                    email,
                     displayName.trim(),
-                    ""
+                    "",
+                    password
                 )
                 _uiState.update { it.copy(isLoading = false, isSuccess = true) }
                 onNavMain()
