@@ -103,12 +103,7 @@ fun ChatNavGraph() {
         }
         composable("profile") {
             ProfileScreen(
-                onNavBack = { navController.popBackStack() },
-                onNavToLogin = {
-                    navController.navigate("login") {
-                        popUpTo(0) { inclusive = true }
-                    }
-                }
+                onNavBack = { navController.popBackStack() }
             )
         }
         composable("settings") {

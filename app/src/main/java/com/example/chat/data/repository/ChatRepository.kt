@@ -1,8 +1,12 @@
 package com.example.chat.data.repository
 
+import com.example.chat.ChatApplication
+import com.example.chat.core.utils.ActiveChatTracker
+import com.example.chat.core.utils.NotificationHelper
 import com.example.chat.data.model.Conversation
 import com.example.chat.data.model.Message
 import com.example.chat.data.model.User
+import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
@@ -182,6 +186,30 @@ class ChatRepository {
                     compareByDescending<Conversation> { it.isPinnedFor(userId) }
                         .thenByDescending { it.lastMessageAt }
                 ) ?: emptyList()
+
+                for (doc in snapshot?.documentChanges.orEmpty()) {
+                    if (doc.type == DocumentChange.Type.MODIFIED || doc.type == DocumentChange.Type.ADDED) {
+                        val conv = doc.document.toObject(Conversation::class.java).copy(conversationId = doc.document.id)
+                        if (conv.lastMessageSenderId.isNotBlank() && conv.lastMessageSenderId != userId) {
+                            if (conv.conversationId != ActiveChatTracker.activeConversationId) {
+                                val timeDiff = System.currentTimeMillis() - conv.lastMessageAt
+                                if (timeDiff < 20000) {
+                                    val senderName = conv.participantNames[conv.lastMessageSenderId] ?: "Talky"
+                                    try {
+                                        NotificationHelper.showMessageNotification(
+                                            ChatApplication.instance,
+                                            senderName,
+                                            conv.lastMessage,
+                                            conv.conversationId,
+                                            conv.lastMessageSenderId
+                                        )
+                                    } catch (_: Exception) {}
+                                }
+                            }
+                        }
+                    }
+                }
+
                 trySend(conversations)
             }
         awaitClose { listener.remove() }

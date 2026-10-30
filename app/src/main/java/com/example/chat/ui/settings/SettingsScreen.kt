@@ -69,7 +69,7 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.primary
             )
             Spacer(modifier = Modifier.height(12.dp))
-            Text("App Name: Chatly", fontSize = 15.sp)
+            Text("App Name: Talky", fontSize = 15.sp)
             Text("Version: 1.0.0", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
