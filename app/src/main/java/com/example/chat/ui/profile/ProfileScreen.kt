@@ -5,7 +5,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
@@ -13,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -20,6 +24,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.chat.core.utils.CloudinaryUploader
 import com.example.chat.data.repository.AuthRepository
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.launch
@@ -28,8 +33,7 @@ import kotlinx.coroutines.tasks.await
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(
-    onNavBack: () -> Unit,
-    onNavToLogin: () -> Unit
+    onNavBack: () -> Unit
 ) {
     val context = LocalContext.current
     val authRepository = remember { AuthRepository() }
@@ -40,6 +44,8 @@ fun ProfileScreen(
     var userEmail by remember { mutableStateOf(authRepository.currentUserEmail ?: "") }
     var displayName by remember { mutableStateOf("") }
     var photoUrl by remember { mutableStateOf("") }
+    var profilePictures by remember { mutableStateOf<List<String>>(emptyList()) }
+    var isGridView by remember { mutableStateOf(true) }
     var isSaving by remember { mutableStateOf(false) }
     var saveMessage by remember { mutableStateOf<String?>(null) }
 
@@ -57,11 +63,14 @@ fun ProfileScreen(
                 try {
                     val downloadUrl = CloudinaryUploader.uploadToCloudinary(context, uri, cloudinaryCloudName, cloudinaryUploadPreset)
                     if (downloadUrl != null) {
-                        // Update user document
                         val userRef = firestore.collection("users").document(currentUserId)
-                        userRef.update("photoUrl", downloadUrl).await()
+                        userRef.update(
+                            mapOf(
+                                "photoUrl" to downloadUrl,
+                                "profilePictures" to FieldValue.arrayUnion(downloadUrl)
+                            )
+                        ).await()
 
-                        // Update participant photos in all existing conversations
                         val convQuery = firestore.collection("conversations")
                             .whereArrayContains("participantIds", currentUserId)
                             .get()
@@ -76,6 +85,7 @@ fun ProfileScreen(
                         }
 
                         photoUrl = downloadUrl
+                        profilePictures = (listOf(downloadUrl) + profilePictures).distinct()
                         saveMessage = "Profile picture updated successfully!"
                     } else {
                         saveMessage = "Failed to upload. Please try again."
@@ -89,14 +99,45 @@ fun ProfileScreen(
         }
     }
 
+    fun setAsCurrentProfile(url: String) {
+        scope.launch {
+            isSaving = true
+            try {
+                val userRef = firestore.collection("users").document(currentUserId)
+                userRef.update("photoUrl", url).await()
+
+                val convQuery = firestore.collection("conversations")
+                    .whereArrayContains("participantIds", currentUserId)
+                    .get()
+                    .await()
+
+                if (!convQuery.isEmpty) {
+                    val batch = firestore.batch()
+                    for (doc in convQuery.documents) {
+                        batch.update(doc.reference, "participantPhotos.$currentUserId", url)
+                    }
+                    batch.commit().await()
+                }
+
+                photoUrl = url
+                saveMessage = "Current profile picture updated!"
+            } catch (e: Exception) {
+                saveMessage = "Failed: ${e.localizedMessage}"
+            } finally {
+                isSaving = false
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
         val user = authRepository.getCurrentUserData()
         if (user != null) {
-            displayName = user.displayName.ifBlank { "Chatly User" }
+            displayName = user.displayName.ifBlank { "Talky User" }
             userEmail = user.email
             photoUrl = user.photoUrl
+            profilePictures = (listOf(user.photoUrl) + user.profilePictures).filter { it.isNotBlank() }.distinct()
         } else {
-            displayName = "Chatly User"
+            displayName = "Talky User"
         }
     }
 
@@ -113,144 +154,294 @@ fun ProfileScreen(
             )
         }
     ) { padding ->
-        Column(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(24.dp))
-            
-            // Profile Picture Avatar (Clickable to change)
-            Box(
-                modifier = Modifier
-                    .size(100.dp)
-                    .clip(CircleShape)
-                    .clickable { imagePickerLauncher.launch("image/*") },
-                contentAlignment = Alignment.Center
-            ) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.primaryContainer
-                ) {
-                    if (photoUrl.isNotBlank()) {
-                        AsyncImage(
-                            model = photoUrl,
-                            contentDescription = "Profile Picture",
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
-                        Box(contentAlignment = Alignment.Center) {
-                            Text(
-                                text = if (displayName.isNotBlank()) displayName.take(1).uppercase() else "U",
-                                fontSize = 40.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        }
-                    }
-                }
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "Tap image to change",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.primary
-            )
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            OutlinedTextField(
-                value = displayName,
-                onValueChange = { displayName = it; saveMessage = null },
-                label = { Text("Display Name") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            OutlinedTextField(
-                value = userEmail,
-                onValueChange = {},
-                label = { Text("Email Address") },
-                readOnly = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            if (saveMessage != null) {
+            item {
                 Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = saveMessage!!,
-                    color = MaterialTheme.colorScheme.primary,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Button(
-                onClick = {
-                    val newName = displayName.trim()
-                    if (currentUserId.isNotBlank() && newName.isNotBlank()) {
-                        scope.launch {
-                            isSaving = true
-                            try {
-                                val userRef = firestore.collection("users").document(currentUserId)
-                                val userData = mapOf(
-                                    "uid" to currentUserId,
-                                    "displayName" to newName,
-                                    "email" to userEmail,
-                                    "photoUrl" to photoUrl
+                
+                // Profile Picture Avatar (Clickable to change)
+                Box(
+                    modifier = Modifier
+                        .size(100.dp)
+                        .clip(CircleShape)
+                        .clickable { imagePickerLauncher.launch("image/*") },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.primaryContainer
+                    ) {
+                        if (photoUrl.isNotBlank()) {
+                            AsyncImage(
+                                model = photoUrl,
+                                contentDescription = "Profile Picture",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = if (displayName.isNotBlank()) displayName.take(1).uppercase() else "U",
+                                    fontSize = 40.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
                                 )
-                                userRef.set(userData, SetOptions.merge()).await()
-
-                                val convQuery = firestore.collection("conversations")
-                                    .whereArrayContains("participantIds", currentUserId)
-                                    .get()
-                                    .await()
-
-                                if (!convQuery.isEmpty) {
-                                    val batch = firestore.batch()
-                                    for (doc in convQuery.documents) {
-                                        batch.update(doc.reference, "participantNames.$currentUserId", newName)
-                                    }
-                                    batch.commit().await()
-                                }
-
-                                saveMessage = "Profile updated successfully!"
-                            } catch (e: Exception) {
-                                saveMessage = "Failed to update: ${e.localizedMessage}"
-                            } finally {
-                                isSaving = false
                             }
                         }
                     }
-                },
-                enabled = !isSaving,
-                modifier = Modifier.fillMaxWidth().height(50.dp)
-            ) {
-                if (isSaving) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
-                } else {
-                    Text("Save Changes", fontSize = 16.sp)
                 }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Tap image to change",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                OutlinedTextField(
+                    value = displayName,
+                    onValueChange = { displayName = it; saveMessage = null },
+                    label = { Text("Display Name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                OutlinedTextField(
+                    value = userEmail,
+                    onValueChange = {},
+                    label = { Text("Email Address") },
+                    readOnly = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (saveMessage != null) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = saveMessage!!,
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Button(
+                    onClick = {
+                        val newName = displayName.trim()
+                        if (currentUserId.isNotBlank() && newName.isNotBlank()) {
+                            scope.launch {
+                                isSaving = true
+                                try {
+                                    val userRef = firestore.collection("users").document(currentUserId)
+                                    val userData = mapOf(
+                                        "uid" to currentUserId,
+                                        "displayName" to newName,
+                                        "email" to userEmail,
+                                        "photoUrl" to photoUrl
+                                    )
+                                    userRef.set(userData, SetOptions.merge()).await()
+
+                                    val convQuery = firestore.collection("conversations")
+                                        .whereArrayContains("participantIds", currentUserId)
+                                        .get()
+                                        .await()
+
+                                    if (!convQuery.isEmpty) {
+                                        val batch = firestore.batch()
+                                        for (doc in convQuery.documents) {
+                                            batch.update(doc.reference, "participantNames.$currentUserId", newName)
+                                        }
+                                        batch.commit().await()
+                                    }
+
+                                    saveMessage = "Profile updated successfully!"
+                                } catch (e: Exception) {
+                                    saveMessage = "Failed to update: ${e.localizedMessage}"
+                                } finally {
+                                    isSaving = false
+                                }
+                            }
+                        }
+                    },
+                    enabled = !isSaving,
+                    modifier = Modifier.fillMaxWidth().height(50.dp)
+                ) {
+                    if (isSaving) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
+                    } else {
+                        Text("Save Changes", fontSize = 16.sp)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // Gallery Header with View Toggle Buttons (Grid vs List)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Profile Gallery (${profilePictures.size})",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Button(
+                            onClick = { isGridView = true },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isGridView) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = if (isGridView) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                            ),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Text("Grid", fontSize = 12.sp)
+                        }
+                        Button(
+                            onClick = { isGridView = false },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (!isGridView) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = if (!isGridView) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                            ),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Text("List", fontSize = 12.sp)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Button(
-                onClick = {
-                    scope.launch {
-                        authRepository.logout()
-                        onNavToLogin()
+            if (profilePictures.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(120.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "No uploaded pictures yet. Tap your avatar above to add some!",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                modifier = Modifier.fillMaxWidth().height(50.dp)
-            ) {
-                Text("Sign Out", fontSize = 16.sp, color = MaterialTheme.colorScheme.onError)
+                }
+            } else {
+                if (isGridView) {
+                    val rows = profilePictures.chunked(3)
+                    items(rows) { rowImages ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            for (imgUrl in rowImages) {
+                                val isSelected = (imgUrl == photoUrl)
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .aspectRatio(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { setAsCurrentProfile(imgUrl) },
+                                    contentAlignment = Alignment.TopEnd
+                                ) {
+                                    AsyncImage(
+                                        model = imgUrl,
+                                        contentDescription = "Gallery Image",
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                    if (isSelected) {
+                                        Surface(
+                                            modifier = Modifier.padding(4.dp),
+                                            shape = CircleShape,
+                                            color = MaterialTheme.colorScheme.primary
+                                        ) {
+                                            Text(
+                                                text = "✓",
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                color = MaterialTheme.colorScheme.onPrimary,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            repeat(3 - rowImages.size) {
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+                } else {
+                    items(profilePictures) { imgUrl ->
+                        val isSelected = (imgUrl == photoUrl)
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 6.dp)
+                                .clickable { setAsCurrentProfile(imgUrl) },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    AsyncImage(
+                                        model = imgUrl,
+                                        contentDescription = "Gallery Image",
+                                        modifier = Modifier
+                                            .size(60.dp)
+                                            .clip(RoundedCornerShape(8.dp)),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                    Column {
+                                        Text(
+                                            text = if (isSelected) "Current Profile Picture" else "Uploaded Picture",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp
+                                        )
+                                        Text(
+                                            text = "Tap to set as current",
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                if (isSelected) {
+                                    Badge {
+                                        Text("Active")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

@@ -5,6 +5,7 @@ data class User(
     val displayName: String = "",
     val email: String = "",
     val photoUrl: String = "",
+    val profilePictures: List<String> = emptyList(),
     val createdAt: Long = System.currentTimeMillis(),
     val lastSeenAt: Long = System.currentTimeMillis(),
     val presence: String = "offline"

@@ -103,6 +103,14 @@ fun ConversationScreen(
     onNavBack: () -> Unit,
     onNavToChat: ((conversationId: String, recipientId: String, recipientName: String) -> Unit)? = null
 ) {
+    val activeConversationId = viewModel.conversationId
+    DisposableEffect(activeConversationId) {
+        com.example.chat.core.utils.ActiveChatTracker.activeConversationId = activeConversationId
+        onDispose {
+            com.example.chat.core.utils.ActiveChatTracker.activeConversationId = null
+        }
+    }
+
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
     val coroutineScope = rememberCoroutineScope()
