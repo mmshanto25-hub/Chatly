@@ -9,7 +9,8 @@ data class Message(
     val createdAt: Long = System.currentTimeMillis(),
     val readBy: List<String> = emptyList(),
     val attachmentUrl: String = "",
-    val isPinned: Boolean = false,
+    val attachmentUrls: List<String> = emptyList(),
+    val replyToMessageId: String = "",
     val replyToText: String = "",
     val replyToSenderName: String = ""
 )

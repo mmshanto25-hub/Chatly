@@ -20,8 +20,6 @@ data class Conversation(
     val archivedBy: List<String> = emptyList(),
     val mutedBy: List<String> = emptyList(),
     val deletedFor: List<String> = emptyList(),
-    val pinnedMessageId: String = "",
-    val pinnedMessageText: String = "",
     val nicknames: Map<String, String> = emptyMap(),
     val themeColor: String = "blue"
 ) {

@@ -78,6 +78,7 @@ dependencies {
 
     // Coil
     implementation(libs.coil.compose)
+    implementation("io.coil-kt:coil-video:2.7.0")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.ext.junit)

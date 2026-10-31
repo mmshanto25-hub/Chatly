@@ -563,7 +563,11 @@ fun ConversationItem(
         }
     }
 
-    val photoUrl = conversation.participantPhotos[recipientId] ?: ""
+    val photoUrl = if (conversation.type == "group") {
+        conversation.groupPhoto.ifBlank { conversation.participantPhotos["groupPhoto"] ?: "" }
+    } else {
+        conversation.participantPhotos[recipientId] ?: ""
+    }
     val isPinned = conversation.isPinnedFor(currentUserId)
     val isMuted = conversation.isMutedFor(currentUserId)
 
@@ -587,7 +591,8 @@ fun ConversationItem(
                 AsyncImage(
                     model = photoUrl,
                     contentDescription = "Profile Picture",
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
                 )
             } else if (conversation.type == "group") {
                 Box(contentAlignment = Alignment.Center) {

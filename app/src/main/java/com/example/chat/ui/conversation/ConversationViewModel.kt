@@ -1,6 +1,7 @@
 package com.example.chat.ui.conversation
 
 import android.content.Context
+import android.media.MediaRecorder
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -14,6 +15,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import java.io.File
 
 data class ConversationUiState(
     val messages: List<Message> = emptyList(),
@@ -25,7 +27,8 @@ data class ConversationUiState(
     val messageInput: String = "",
     val isUploading: Boolean = false,
     val uploadProgress: Int = 0,
-    val replyingToMessage: Message? = null
+    val replyingToMessage: Message? = null,
+    val isRecordingVoice: Boolean = false
 )
 
 class ConversationViewModel(
@@ -138,12 +141,6 @@ class ConversationViewModel(
         if (text.isBlank() || currentUserId.isBlank()) return
         viewModelScope.launch {
             chatRepository.sendMessage(conversationId, currentUserId, text)
-        }
-    }
-
-    fun togglePinMessage(messageId: String, messageText: String, isCurrentlyPinned: Boolean) {
-        viewModelScope.launch {
-            chatRepository.togglePinMessage(conversationId, messageId, isCurrentlyPinned, messageText)
         }
     }
 
@@ -310,61 +307,193 @@ class ConversationViewModel(
     }
 
     fun sendMediaMessage(context: Context, uri: Uri, type: String) {
-        if (currentUserId.isBlank()) return
+        sendMultipleMediaMessages(context, listOf(uri))
+    }
+
+    fun sendMultipleMediaMessages(context: Context, uris: List<Uri>) {
+        if (currentUserId.isBlank() || uris.isEmpty()) return
         viewModelScope.launch {
             _uiState.update { it.copy(isUploading = true, uploadProgress = 0) }
             try {
-                val downloadUrl = CloudinaryUploader.uploadToCloudinary(
-                    context = context,
-                    imageUri = uri,
-                    cloudName = "tmtqcamm",
-                    uploadPreset = "chatly_unsigned",
-                    onProgress = { percent: Int ->
-                        _uiState.update { it.copy(uploadProgress = percent) }
+                val total = uris.size
+                val imageVideoUris = mutableListOf<Uri>()
+                val audioUris = mutableListOf<Uri>()
+
+                uris.forEach { uri ->
+                    val mimeType = context.contentResolver.getType(uri) ?: ""
+                    val path = uri.toString().lowercase()
+                    val type = if (mimeType.startsWith("audio", ignoreCase = true) || path.endsWith(".3gp") || path.endsWith(".m4a") || path.endsWith(".mp3") || path.endsWith(".wav") || path.endsWith(".aac")) {
+                        "audio"
+                    } else {
+                        "image_or_video"
                     }
-                )
+                    if (type == "audio") {
+                        audioUris.add(uri)
+                    } else {
+                        imageVideoUris.add(uri)
+                    }
+                }
 
-                if (downloadUrl != null) {
-                    val textSummary = when (type) {
-                        "image" -> "📷 Photo"
-                        "video" -> "📹 Video"
-                        "audio" -> "🎤 Voice message"
-                        "document" -> "📄 Document"
-                        else -> "📎 Attachment"
+                // 1. Send audio files individually
+                for (audioUri in audioUris) {
+                    uploadAndSendSingleItem(context, audioUri, "audio")
+                }
+
+                // 2. Bundle image/video files into a media_group if > 1, or single if 1
+                if (imageVideoUris.isNotEmpty()) {
+                    val downloadUrls = mutableListOf<String>()
+                    imageVideoUris.forEachIndexed { index, uri ->
+                        val progressPercent = ((index + 1) * 100) / total
+                        _uiState.update { it.copy(uploadProgress = progressPercent) }
+
+                        val downloadUrl = CloudinaryUploader.uploadToCloudinary(
+                            context = context,
+                            imageUri = uri,
+                            cloudName = "tmtqcamm",
+                            uploadPreset = "chatly_unsigned"
+                        )
+                        if (downloadUrl != null) {
+                            downloadUrls.add(downloadUrl)
+                        }
                     }
 
-                    val msgRef = firestore.collection("conversations")
-                        .document(conversationId)
-                        .collection("messages")
-                        .document()
+                    if (downloadUrls.isNotEmpty()) {
+                        val isMultiple = downloadUrls.size > 1
+                        val firstUriStr = imageVideoUris.firstOrNull()?.toString()?.lowercase() ?: ""
+                        val isVideo = firstUriStr.contains("video") || firstUriStr.endsWith(".mp4") || firstUriStr.endsWith(".mov") || firstUriStr.endsWith(".mkv") || firstUriStr.endsWith(".webm")
 
-                    val messageId = msgRef.id
-                    val message = Message(
-                        messageId = messageId,
-                        conversationId = conversationId,
-                        senderId = currentUserId,
-                        text = textSummary,
-                        messageType = type,
-                        attachmentUrl = downloadUrl,
-                        createdAt = System.currentTimeMillis()
-                    )
+                        val messageType = if (isMultiple) "media_group" else if (isVideo) "video" else "image"
+                        val textSummary = if (isMultiple) "📷 Media Album (${downloadUrls.size})" else if (isVideo) "📹 Video" else "📷 Photo"
 
-                    msgRef.set(message).await()
+                        val msgRef = firestore.collection("conversations")
+                            .document(conversationId)
+                            .collection("messages")
+                            .document()
 
-                    firestore.collection("conversations")
-                        .document(conversationId)
-                        .update(
-                            mapOf(
-                                "lastMessage" to textSummary,
-                                "lastMessageAt" to System.currentTimeMillis(),
-                                "lastMessageSenderId" to currentUserId,
-                                "updatedAt" to System.currentTimeMillis()
-                            )
-                        ).await()
+                        val messageId = msgRef.id
+                        val message = Message(
+                            messageId = messageId,
+                            conversationId = conversationId,
+                            senderId = currentUserId,
+                            text = textSummary,
+                            messageType = messageType,
+                            attachmentUrl = downloadUrls.firstOrNull() ?: "",
+                            attachmentUrls = if (isMultiple) downloadUrls else emptyList(),
+                            createdAt = System.currentTimeMillis()
+                        )
+
+                        msgRef.set(message).await()
+
+                        firestore.collection("conversations")
+                            .document(conversationId)
+                            .update(
+                                mapOf(
+                                    "lastMessage" to textSummary,
+                                    "lastMessageAt" to System.currentTimeMillis(),
+                                    "lastMessageSenderId" to currentUserId,
+                                    "updatedAt" to System.currentTimeMillis()
+                                )
+                            ).await()
+                    }
                 }
             } catch (_: Exception) {
             } finally {
                 _uiState.update { it.copy(isUploading = false, uploadProgress = 0) }
+            }
+        }
+    }
+
+    private suspend fun uploadAndSendSingleItem(context: Context, uri: Uri, type: String) {
+        try {
+            val downloadUrl = CloudinaryUploader.uploadToCloudinary(
+                context = context,
+                imageUri = uri,
+                cloudName = "tmtqcamm",
+                uploadPreset = "chatly_unsigned"
+            )
+
+            if (downloadUrl != null) {
+                val textSummary = when (type) {
+                    "image" -> "📷 Photo"
+                    "video" -> "📹 Video"
+                    "audio" -> "🎤 Voice message"
+                    else -> "📎 Attachment"
+                }
+
+                val msgRef = firestore.collection("conversations")
+                    .document(conversationId)
+                    .collection("messages")
+                    .document()
+
+                val messageId = msgRef.id
+                val message = Message(
+                    messageId = messageId,
+                    conversationId = conversationId,
+                    senderId = currentUserId,
+                    text = textSummary,
+                    messageType = type,
+                    attachmentUrl = downloadUrl,
+                    createdAt = System.currentTimeMillis()
+                )
+
+                msgRef.set(message).await()
+
+                firestore.collection("conversations")
+                    .document(conversationId)
+                    .update(
+                        mapOf(
+                            "lastMessage" to textSummary,
+                            "lastMessageAt" to System.currentTimeMillis(),
+                            "lastMessageSenderId" to currentUserId,
+                            "updatedAt" to System.currentTimeMillis()
+                        )
+                    ).await()
+            }
+        } catch (_: Exception) {}
+    }
+
+    private var mediaRecorder: MediaRecorder? = null
+    var audioFile: File? = null
+        private set
+
+    fun startRecordingVoice(context: Context) {
+        viewModelScope.launch {
+            try {
+                _uiState.update { it.copy(isRecordingVoice = true) }
+                audioFile = File.createTempFile("voice_", ".3gp", context.cacheDir)
+                mediaRecorder = MediaRecorder().apply {
+                    setAudioSource(MediaRecorder.AudioSource.MIC)
+                    setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP)
+                    setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB)
+                    setOutputFile(audioFile!!.absolutePath)
+                    prepare()
+                    start()
+                }
+            } catch (_: Exception) {
+                _uiState.update { it.copy(isRecordingVoice = false) }
+            }
+        }
+    }
+
+    fun stopAndSendVoiceMessage(context: Context) {
+        viewModelScope.launch {
+            try {
+                mediaRecorder?.stop()
+                mediaRecorder?.release()
+                mediaRecorder = null
+                _uiState.update { it.copy(isRecordingVoice = false) }
+                audioFile?.let { file ->
+                    if (file.exists() && file.length() > 0) {
+                        viewModelScope.launch {
+                            _uiState.update { it.copy(isUploading = true, uploadProgress = 0) }
+                            uploadAndSendSingleItem(context, Uri.fromFile(file), "audio")
+                            _uiState.update { it.copy(isUploading = false, uploadProgress = 0) }
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+                mediaRecorder = null
+                _uiState.update { it.copy(isRecordingVoice = false) }
             }
         }
     }
