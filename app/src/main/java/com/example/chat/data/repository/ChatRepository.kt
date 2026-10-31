@@ -13,15 +13,14 @@ import com.google.firebase.firestore.Query
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.tasks.await
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import java.util.Locale
 
 class ChatRepository {
     private val firestore: FirebaseFirestore? = try {
         FirebaseFirestore.getInstance()
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         null
     }
 
@@ -41,7 +40,7 @@ class ChatRepository {
                         user.email.lowercase(Locale.getDefault()).contains(trimmedQuery)
                     )
                 }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             emptyList()
         }
     }
@@ -56,7 +55,7 @@ class ChatRepository {
             }
             snapshot.documents.mapNotNull { it.toObject(User::class.java) }
                 .filter { it.uid != currentUserId }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             emptyList()
         }
     }
@@ -89,7 +88,7 @@ class ChatRepository {
 
             var existingConvId: String? = null
             for (doc in querySnapshot.documents) {
-                val participants = doc.get("participantIds") as? List<*>
+                val participants = doc["participantIds"] as? List<*>
                 val isDirect = doc.getString("type") ?: "direct"
                 if (isDirect == "direct" && participants != null && participants.contains(recipientId) && participants.size == 2) {
                     existingConvId = doc.getString("conversationId") ?: doc.id
@@ -135,8 +134,8 @@ class ChatRepository {
 
             convRef.set(conversation).await()
             Result.success(conversationId)
-        } catch (e: Exception) {
-            Result.failure(e)
+        } catch (_: Exception) {
+            Result.failure(Exception("Failed to create conversation."))
         }
     }
 
@@ -187,8 +186,8 @@ class ChatRepository {
 
             convRef.set(conversation).await()
             Result.success(conversationId)
-        } catch (e: Exception) {
-            Result.failure(e)
+        } catch (_: Exception) {
+            Result.failure(Exception("Failed to create group conversation."))
         }
     }
 
@@ -309,7 +308,7 @@ class ChatRepository {
         val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
         return try {
             val convDoc = db.collection("conversations").document(conversationId).get().await()
-            val participants = convDoc.get("participantIds") as? List<*>
+            val participants = convDoc["participantIds"] as? List<*>
             val type = convDoc.getString("type") ?: "direct"
             if (type == "direct" && participants != null) {
                 val recipientId = participants.firstOrNull { it != senderId } as? String
@@ -360,8 +359,8 @@ class ChatRepository {
                 ).await()
 
             Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
+        } catch (_: Exception) {
+            Result.failure(Exception("Failed to send message."))
         }
     }
 

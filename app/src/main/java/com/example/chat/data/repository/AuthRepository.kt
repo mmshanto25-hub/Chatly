@@ -8,13 +8,13 @@ import kotlinx.coroutines.tasks.await
 class AuthRepository {
     private val auth: FirebaseAuth? = try {
         FirebaseAuth.getInstance()
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         null
     }
 
     private val firestore: FirebaseFirestore? = try {
         FirebaseFirestore.getInstance()
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         null
     }
 
@@ -61,7 +61,7 @@ class AuthRepository {
                 username = username,
                 createdAt = System.currentTimeMillis(),
                 lastSeenAt = System.currentTimeMillis(),
-                presence = "online"
+                presence = "online",
             )
             db.collection("users").document(uid).set(user).await()
             Result.success(Unit)
@@ -73,12 +73,12 @@ class AuthRepository {
     suspend fun logout() {
         try {
             val uid = currentUserId
-            if (uid != null && firestore != null) {
+            if ((uid != null) && (firestore != null)) {
                 firestore.collection("users").document(uid).update(
                     mapOf(
                         "presence" to "offline",
-                        "lastSeenAt" to System.currentTimeMillis()
-                    )
+                        "lastSeenAt" to System.currentTimeMillis(),
+                    ),
                 ).await()
             }
         } catch (_: Exception) {}
@@ -93,7 +93,7 @@ class AuthRepository {
         return try {
             val snapshot = db.collection("users").document(uid).get().await()
             snapshot.toObject(User::class.java)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             null
         }
     }
@@ -105,8 +105,8 @@ class AuthRepository {
             db.collection("users").document(uid).update(
                 mapOf(
                     "presence" to status,
-                    "lastSeenAt" to System.currentTimeMillis()
-                )
+                    "lastSeenAt" to System.currentTimeMillis(),
+                ),
             ).await()
         } catch (_: Exception) {}
     }
@@ -126,8 +126,8 @@ class AuthRepository {
             val batch = db.batch()
             for (doc in convQuery.documents) {
                 val type = doc.getString("type") ?: "direct"
-                val participants = doc.get("participantIds") as? List<*>
-                if (type == "direct" || participants?.size == 2) {
+                val participants = doc["participantIds"] as? List<*>
+                if ((type == "direct") || (participants?.size == 2)) {
                     batch.delete(doc.reference)
                 } else {
                     batch.update(doc.reference, "participantIds", com.google.firebase.firestore.FieldValue.arrayRemove(uid))

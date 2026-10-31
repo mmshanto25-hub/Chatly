@@ -306,7 +306,7 @@ class ConversationViewModel(
         }
     }
 
-    fun sendMediaMessage(context: Context, uri: Uri, type: String) {
+    fun sendMediaMessage(context: Context, uri: Uri, type: String = "") {
         sendMultipleMediaMessages(context, listOf(uri))
     }
 
@@ -461,7 +461,12 @@ class ConversationViewModel(
             try {
                 _uiState.update { it.copy(isRecordingVoice = true) }
                 audioFile = File.createTempFile("voice_", ".3gp", context.cacheDir)
-                mediaRecorder = MediaRecorder().apply {
+                mediaRecorder = (if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                    MediaRecorder(context)
+                } else {
+                    @Suppress("DEPRECATION")
+                    MediaRecorder()
+                }).apply {
                     setAudioSource(MediaRecorder.AudioSource.MIC)
                     setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP)
                     setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB)

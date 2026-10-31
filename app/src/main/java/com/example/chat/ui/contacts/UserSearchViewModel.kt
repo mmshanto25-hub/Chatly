@@ -83,7 +83,7 @@ class UserSearchViewModel : ViewModel() {
 
                 var existingConvId: String? = null
                 for (doc in querySnapshot.documents) {
-                    val participants = doc.get("participantIds") as? List<*>
+                    val participants = doc["participantIds"] as? List<*>
                     if (participants != null && participants.contains(recipient.uid) && participants.size == 2) {
                         existingConvId = doc.getString("conversationId") ?: doc.id
                         break
