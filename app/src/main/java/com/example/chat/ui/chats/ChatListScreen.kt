@@ -27,6 +27,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import com.chatly.app.R
 import androidx.compose.ui.text.style.TextOverflow
@@ -38,6 +39,8 @@ import coil.compose.AsyncImage
 import com.example.chat.data.local.SavedAccount
 import com.example.chat.data.local.SavedAccountManager
 import com.example.chat.data.model.Conversation
+import com.example.chat.data.repository.AuthRepository
+import kotlinx.coroutines.launch
 import java.util.Calendar
 import java.util.Locale
 
@@ -53,11 +56,14 @@ fun ChatListScreen(
     onSwitchAccount: () -> Unit
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     val uiState by viewModel.uiState.collectAsState()
     val currentUserId = viewModel.currentUserId
     var showMenu by remember { mutableStateOf(false) }
     var isSearching by remember { mutableStateOf(false) }
     var showAccountSwitcher by remember { mutableStateOf(false) }
+    var showAddAccountDialog by remember { mutableStateOf(false) }
+    var showRegisterDialog by remember { mutableStateOf(false) }
 
     var selectedConversationForMenu by remember { mutableStateOf<Conversation?>(null) }
     var accountToSwitch by remember { mutableStateOf<SavedAccount?>(null) }
@@ -475,6 +481,43 @@ fun ChatListScreen(
                         }
                     }
                 }
+
+                // Add New Account button
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            showAccountSwitcher = false
+                            showAddAccountDialog = true
+                        },
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Surface(
+                            modifier = Modifier.size(44.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text("➕", fontSize = 20.sp)
+                            }
+                        }
+                        Text(
+                            text = "Add New Account",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(24.dp))
             }
         }
@@ -534,6 +577,200 @@ fun ChatListScreen(
                 TextButton(
                     onClick = { accountToSwitch = null },
                     enabled = !isSwitching
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showAddAccountDialog) {
+        var newEmailInput by remember { mutableStateOf("") }
+        var newPasswordInput by remember { mutableStateOf("") }
+        var addAccountError by remember { mutableStateOf<String?>(null) }
+        var isAdding by remember { mutableStateOf(false) }
+
+        AlertDialog(
+            onDismissRequest = { if (!isAdding) showAddAccountDialog = false },
+            title = { Text("Add New Account", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Enter credentials for the new account:", fontSize = 14.sp)
+                    OutlinedTextField(
+                        value = newEmailInput,
+                        onValueChange = { newEmailInput = it; addAccountError = null },
+                        label = { Text("Email or Username") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = newPasswordInput,
+                        onValueChange = { newPasswordInput = it; addAccountError = null },
+                        label = { Text("Password") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (addAccountError != null) {
+                        Text(addAccountError!!, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    TextButton(
+                        onClick = {
+                            showAddAccountDialog = false
+                            showRegisterDialog = true
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Don't have an account? Register here", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (newEmailInput.isBlank() || newPasswordInput.isBlank()) {
+                            addAccountError = "Please enter email and password"
+                            return@Button
+                        }
+                        isAdding = true
+                        addAccountError = null
+                        viewModel.switchAccount(context, newEmailInput.trim(), newPasswordInput, {
+                            isAdding = false
+                            showAddAccountDialog = false
+                            onSwitchAccount()
+                        }, { err ->
+                            isAdding = false
+                            addAccountError = err
+                        })
+                    },
+                    enabled = !isAdding
+                ) {
+                    if (isAdding) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White)
+                    } else {
+                        Text("Log In & Add")
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { if (!isAdding) showAddAccountDialog = false },
+                    enabled = !isAdding
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showRegisterDialog) {
+        var regNameInput by remember { mutableStateOf("") }
+        var regEmailInput by remember { mutableStateOf("") }
+        var regPasswordInput by remember { mutableStateOf("") }
+        var regConfirmInput by remember { mutableStateOf("") }
+        var regError by remember { mutableStateOf<String?>(null) }
+        var isRegistering by remember { mutableStateOf(false) }
+
+        AlertDialog(
+            onDismissRequest = { if (!isRegistering) showRegisterDialog = false },
+            title = { Text("Create New Account", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Enter details to register a new account:", fontSize = 14.sp)
+                    OutlinedTextField(
+                        value = regNameInput,
+                        onValueChange = { regNameInput = it; regError = null },
+                        label = { Text("Full Name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = regEmailInput,
+                        onValueChange = { regEmailInput = it; regError = null },
+                        label = { Text("Email or Username") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = regPasswordInput,
+                        onValueChange = { regPasswordInput = it; regError = null },
+                        label = { Text("Password (min 6 chars)") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = regConfirmInput,
+                        onValueChange = { regConfirmInput = it; regError = null },
+                        label = { Text("Confirm Password") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (regError != null) {
+                        Text(regError!!, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (regNameInput.isBlank() || regEmailInput.isBlank() || regPasswordInput.isBlank() || regConfirmInput.isBlank()) {
+                            regError = "Please fill in all fields"
+                            return@Button
+                        }
+                        if (regPasswordInput != regConfirmInput) {
+                            regError = "Passwords do not match"
+                            return@Button
+                        }
+                        if (regPasswordInput.length < 6) {
+                            regError = "Password must be at least 6 characters"
+                            return@Button
+                        }
+                        isRegistering = true
+                        regError = null
+                        coroutineScope.launch {
+                            try {
+                                val result = AuthRepository().register(regNameInput.trim(), regEmailInput.trim(), regPasswordInput)
+                                if (result.isSuccess) {
+                                    val email = if (!regEmailInput.contains("@")) "${regEmailInput.trim()}@talky.com" else regEmailInput.trim()
+                                    SavedAccountManager.saveAccount(
+                                        context,
+                                        email,
+                                        regNameInput.trim(),
+                                        "",
+                                        regPasswordInput
+                                    )
+                                    isRegistering = false
+                                    showRegisterDialog = false
+                                    onSwitchAccount()
+                                } else {
+                                    isRegistering = false
+                                    regError = result.exceptionOrNull()?.localizedMessage ?: "Registration failed"
+                                }
+                            } catch (e: Exception) {
+                                isRegistering = false
+                                regError = e.localizedMessage ?: "Registration failed"
+                            }
+                        }
+                    },
+                    enabled = !isRegistering
+                ) {
+                    if (isRegistering) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White)
+                    } else {
+                        Text("Register & Add")
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { if (!isRegistering) showRegisterDialog = false },
+                    enabled = !isRegistering
                 ) {
                     Text("Cancel")
                 }

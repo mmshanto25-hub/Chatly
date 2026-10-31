@@ -33,6 +33,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Send
@@ -140,22 +141,28 @@ fun getThemeBottomBarContentColor(theme: String): Color {
     }
 }
 
-fun downloadImage(context: Context, imageUrl: String) {
+fun downloadMedia(context: Context, mediaUrl: String, isVideo: Boolean) {
     try {
-        val request = DownloadManager.Request(Uri.parse(imageUrl))
-            .setTitle("Profile Image")
-            .setDescription("Downloading image...")
+        val ext = if (isVideo) "mp4" else "jpg"
+        val title = if (isVideo) "Video File" else "Image File"
+        val request = DownloadManager.Request(Uri.parse(mediaUrl))
+            .setTitle(title)
+            .setDescription("Downloading $title...")
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             .setAllowedOverMetered(true)
             .setAllowedOverRoaming(true)
-            .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "Talky_${System.currentTimeMillis()}.jpg")
+            .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "Chatly_${System.currentTimeMillis()}.$ext")
 
         val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
         downloadManager.enqueue(request)
-        Toast.makeText(context, "Downloading image to Downloads...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "Downloading $title to Downloads...", Toast.LENGTH_SHORT).show()
     } catch (e: Exception) {
         Toast.makeText(context, "Failed to download: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
     }
+}
+
+fun downloadImage(context: Context, imageUrl: String) {
+    downloadMedia(context, imageUrl, false)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -181,19 +188,20 @@ fun ConversationScreen(
     val listState = rememberLazyListState()
 
     var fullScreenImageGallery by remember { mutableStateOf<Pair<List<String>, Int>?>(null) }
-    var showSharedMediaGallery by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     var showNicknameDialog by remember { mutableStateOf(false) }
     var showThemeDialog by remember { mutableStateOf(false) }
     var showCreateGroupDialog by remember { mutableStateOf(false) }
     var showRecipientProfileDialog by remember { mutableStateOf(false) }
     var showGroupDetailsDialog by remember { mutableStateOf(false) }
+    var showChatInfoDialog by remember { mutableStateOf(false) }
     var currentUserName by remember { mutableStateOf("User") }
     var availableUsersForGroup by remember { mutableStateOf<List<User>>(emptyList()) }
     var isFetchingUsers by remember { mutableStateOf(false) }
 
     var recipientGalleryPics by remember { mutableStateOf<List<String>>(emptyList()) }
     var fullScreenGalleryIndex by remember { mutableStateOf<Int?>(null) }
+    var activeAlbumGridUrls by remember { mutableStateOf<List<String>?>(null) }
 
     val allChatImages = remember(uiState.messages) {
         uiState.messages.flatMap { msg ->
@@ -204,7 +212,7 @@ fun ConversationScreen(
             } else {
                 emptyList()
             }
-        }.distinct()
+        }.distinct().reversed()
     }
 
     LaunchedEffect(currentUserId) {
@@ -243,20 +251,66 @@ fun ConversationScreen(
         }
     }
 
-    // Shared Media Gallery Dialog (Grid & List view of all conversation images/videos)
-    if (showSharedMediaGallery) {
-        SharedMediaGalleryDialog(
+    if (showChatInfoDialog && conversation?.type != "group") {
+        ChatInfoDialog(
+            recipientName = displayName,
+            recipientPhoto = uiState.recipientPhoto,
+            presence = uiState.recipientPresence,
+            lastSeen = uiState.recipientLastSeen,
             messages = uiState.messages,
-            onDismiss = { showSharedMediaGallery = false },
-            onMediaClick = { url ->
-                showSharedMediaGallery = false
-                val idx = allChatImages.indexOf(url).coerceAtLeast(0)
-                fullScreenImageGallery = Pair(allChatImages, idx)
+            onDismiss = { showChatInfoDialog = false },
+            onOpenNickname = { showNicknameDialog = true },
+            onOpenTheme = { showThemeDialog = true },
+            onOpenCreateGroup = {
+                showCreateGroupDialog = true
+                isFetchingUsers = true
+                viewModel.fetchAvailableUsers { users ->
+                    availableUsersForGroup = users.filter { it.uid != recipientId }
+                    isFetchingUsers = false
+                }
+            },
+            onMediaClick = { url, type ->
+                if (type == "video") {
+                    try {
+                        val intent = Intent(Intent.ACTION_VIEW).apply {
+                            setDataAndType(Uri.parse(url), "video/*")
+                            flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        }
+                        context.startActivity(intent)
+                    } catch (_: Exception) {
+                        Toast.makeText(context, "Cannot play video", Toast.LENGTH_SHORT).show()
+                    }
+                } else if (type == "audio") {
+                    try {
+                        MediaPlayer().apply {
+                            setDataSource(url)
+                            prepareAsync()
+                            setOnPreparedListener { it.start() }
+                        }
+                        Toast.makeText(context, "Playing audio...", Toast.LENGTH_SHORT).show()
+                    } catch (_: Exception) {
+                        Toast.makeText(context, "Cannot play audio", Toast.LENGTH_SHORT).show()
+                    }
+                } else {
+                    showChatInfoDialog = false
+                    val idx = allChatImages.indexOf(url).coerceAtLeast(0)
+                    fullScreenImageGallery = Pair(allChatImages, idx)
+                }
             }
         )
     }
 
-    // Full Screen Image Gallery with Horizontal Pager, Pinch-to-Zoom, and Download
+    if (activeAlbumGridUrls != null) {
+        AlbumGridDialog(
+            urls = activeAlbumGridUrls!!,
+            onDismiss = { activeAlbumGridUrls = null },
+            onImageClick = { idx: Int ->
+                val urls = activeAlbumGridUrls!!
+                activeAlbumGridUrls = null
+                fullScreenImageGallery = Pair(urls, idx)
+            }
+        )
+    }
     if (fullScreenImageGallery != null) {
         val (images, initialIdx) = fullScreenImageGallery!!
         val pagerState = rememberPagerState(initialPage = initialIdx) { images.size }
@@ -302,7 +356,7 @@ fun ConversationScreen(
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                         ) {
-                            Text("Download ⬇️")
+                            Text("Download")
                         }
                     }
                 }
@@ -795,57 +849,28 @@ fun ConversationScreen(
                                     }
                                 }
                                 1 -> {
-                                    val mediaMessages = uiState.messages.filter { it.messageType == "image" || it.messageType == "video" || it.messageType == "audio" }
-                                    if (mediaMessages.isEmpty()) {
-                                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                            Text("No shared media found.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
-                                    } else {
-                                        LazyColumn(
-                                            modifier = Modifier.fillMaxSize().padding(16.dp),
-                                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            items(mediaMessages) { msg ->
-                                                Card(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    shape = RoundedCornerShape(12.dp)
-                                                ) {
-                                                    Column(modifier = Modifier.padding(12.dp)) {
-                                                        Text(
-                                                            text = when(msg.messageType) {
-                                                                "image" -> "📷 Photo"
-                                                                "video" -> "🎥 Video"
-                                                                else -> "🎤 Voice Message"
-                                                            },
-                                                            fontWeight = FontWeight.Bold,
-                                                            fontSize = 13.sp,
-                                                            color = MaterialTheme.colorScheme.primary
-                                                        )
-                                                        Spacer(modifier = Modifier.height(4.dp))
-                                                        if (msg.messageType == "image" && msg.attachmentUrl.isNotBlank()) {
-                                                            AsyncImage(
-                                                                model = msg.attachmentUrl,
-                                                                contentDescription = null,
-                                                                modifier = Modifier
-                                                                    .fillMaxWidth()
-                                                                    .height(160.dp)
-                                                                    .clip(RoundedCornerShape(8.dp))
-                                                                    .clickable {
-                                                                        val idx = allChatImages.indexOf(msg.attachmentUrl).coerceAtLeast(0)
-                                                                        fullScreenImageGallery = Pair(allChatImages, idx)
-                                                                    },
-                                                                contentScale = ContentScale.Crop
-                                                            )
-                                                        } else if (msg.messageType == "video") {
-                                                            Text("Video attachment", fontSize = 14.sp)
-                                                        } else if (msg.messageType == "audio") {
-                                                            VoiceMessagePlayer(audioUrl = msg.attachmentUrl)
-                                                        }
+                                    SharedMediaFolderGallery(
+                                        messages = uiState.messages,
+                                        onMediaClick = { url, type ->
+                                            if (type == "video") {
+                                                try {
+                                                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                                                        setDataAndType(Uri.parse(url), "video/*")
+                                                        flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
                                                     }
+                                                    context.startActivity(intent)
+                                                } catch (_: Exception) {
+                                                    Toast.makeText(context, "Cannot play video", Toast.LENGTH_SHORT).show()
                                                 }
+                                            } else if (type == "audio") {
+                                                Toast.makeText(context, "Voice message / audio file", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                showGroupDetailsDialog = false
+                                                val idx = allChatImages.indexOf(url).coerceAtLeast(0)
+                                                fullScreenImageGallery = Pair(allChatImages, idx)
                                             }
                                         }
-                                    }
+                                    )
                                 }
                                 2 -> {
                                     val themes = listOf("blue", "green", "orange", "purple", "pink", "dark")
@@ -1389,44 +1414,23 @@ fun ConversationScreen(
                     }
                 },
                 actions = {
-                    if (conversation?.type != "group") {
-                        IconButton(onClick = { /* Call action */ }) {
-                            Icon(Icons.Default.Call, contentDescription = "Call", tint = getThemeTopAppBarContentColor(themeColor))
+                    IconButton(onClick = { /* Call action */ }) {
+                        Icon(Icons.Default.Call, contentDescription = "Call", tint = getThemeTopAppBarContentColor(themeColor))
+                    }
+                    IconButton(
+                        onClick = {
+                            if (conversation?.type == "group") {
+                                showGroupDetailsDialog = true
+                            } else {
+                                showChatInfoDialog = true
+                            }
                         }
-                        IconButton(onClick = { showMenu = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "More Options", tint = getThemeTopAppBarContentColor(themeColor))
-                        }
-                        DropdownMenu(
-                            expanded = showMenu,
-                            onDismissRequest = { showMenu = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("✏️ Edit Nickname") },
-                                onClick = {
-                                    showMenu = false
-                                    showNicknameDialog = true
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("🎨 Change Theme") },
-                                onClick = {
-                                    showMenu = false
-                                    showThemeDialog = true
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("👥 Create a group with $displayName") },
-                                onClick = {
-                                    showMenu = false
-                                    showCreateGroupDialog = true
-                                    isFetchingUsers = true
-                                    viewModel.fetchAvailableUsers { users ->
-                                        availableUsersForGroup = users.filter { it.uid != recipientId }
-                                        isFetchingUsers = false
-                                    }
-                                }
-                            )
-                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = "Chat Info",
+                            tint = getThemeTopAppBarContentColor(themeColor)
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -1684,11 +1688,11 @@ fun ConversationScreen(
                                     MediaGroupGrid(
                                         urls = msg.attachmentUrls,
                                         onImageClick = { url ->
-                                            val idx = allChatImages.indexOf(url).coerceAtLeast(0)
-                                            fullScreenImageGallery = Pair(allChatImages, idx)
+                                            val idx = msg.attachmentUrls.indexOf(url).coerceAtLeast(0)
+                                            fullScreenImageGallery = Pair(msg.attachmentUrls, idx)
                                         },
                                         onMoreClick = {
-                                            showSharedMediaGallery = true
+                                            activeAlbumGridUrls = msg.attachmentUrls
                                         }
                                     )
                                     Surface(
@@ -1778,6 +1782,22 @@ fun ConversationScreen(
                                             )
                                         }
                                     }
+                                    // Download button overlay at top-right
+                                    Surface(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(6.dp)
+                                            .size(32.dp)
+                                            .clickable {
+                                                downloadMedia(context, msg.attachmentUrl, true)
+                                            },
+                                        shape = CircleShape,
+                                        color = Color.Black.copy(alpha = 0.6f)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text("⬇", color = Color.White, fontSize = 14.sp)
+                                        }
+                                    }
                                     // Timestamp overlay at bottom-right
                                     Surface(
                                         modifier = Modifier
@@ -1861,119 +1881,146 @@ fun ConversationScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun SharedMediaGalleryDialog(
-    messages: List<Message>,
-    onDismiss: () -> Unit,
-    onMediaClick: (String) -> Unit
-) {
-    var isGridView by remember { mutableStateOf(true) }
+data class MediaItem(
+    val url: String,
+    val type: String, // "image", "video", "audio"
+    val timestamp: Long = 0L
+)
 
-    val allMedia = remember(messages) {
+@Composable
+fun SharedMediaFolderGallery(
+    messages: List<Message>,
+    onMediaClick: (String, String) -> Unit
+) {
+    var selectedFolder by remember { mutableStateOf("all") } // "all", "images", "videos", "audio"
+    var viewMode by remember { mutableStateOf("grid") } // "grid", "list", "slide"
+
+    val allMediaItems = remember(messages) {
         messages.flatMap { msg ->
             when (msg.messageType) {
-                "media_group" -> msg.attachmentUrls.map { Pair(it, "image") }
-                "image" -> listOf(Pair(msg.attachmentUrl, "image"))
-                "video" -> listOf(Pair(msg.attachmentUrl, "video"))
+                "media_group" -> msg.attachmentUrls.map { MediaItem(it, "image", msg.createdAt) }
+                "image" -> if (msg.attachmentUrl.isNotBlank()) listOf(MediaItem(msg.attachmentUrl, "image", msg.createdAt)) else emptyList()
+                "video" -> if (msg.attachmentUrl.isNotBlank()) listOf(MediaItem(msg.attachmentUrl, "video", msg.createdAt)) else emptyList()
+                "audio" -> if (msg.attachmentUrl.isNotBlank()) listOf(MediaItem(msg.attachmentUrl, "audio", msg.createdAt)) else emptyList()
                 else -> emptyList()
             }
-        }.filter { it.first.isNotBlank() }.distinct()
+        }.distinctBy { it.url }.reversed()
     }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = MaterialTheme.colorScheme.background
+    val displayedItems = remember(allMediaItems, selectedFolder) {
+        when (selectedFolder) {
+            "images" -> allMediaItems.filter { it.type == "image" }
+            "videos" -> allMediaItems.filter { it.type == "video" }
+            "audio" -> allMediaItems.filter { it.type == "audio" }
+            else -> allMediaItems
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        ScrollableTabRow(
+            selectedTabIndex = when(selectedFolder) { "images" -> 1; "videos" -> 2; "audio" -> 3; else -> 0 },
+            edgePadding = 16.dp
         ) {
-            Scaffold(
-                topBar = {
-                    TopAppBar(
-                        title = { Text("Shared Media (${allMedia.size})", fontWeight = FontWeight.Bold) },
-                        navigationIcon = {
-                            IconButton(onClick = onDismiss) {
-                                Icon(Icons.Default.Close, contentDescription = "Close")
-                            }
-                        },
-                        actions = {
-                            Row(
-                                modifier = Modifier.padding(end = 12.dp),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Button(
-                                    onClick = { isGridView = true },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (isGridView) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                        contentColor = if (isGridView) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                                    ),
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                                    modifier = Modifier.height(32.dp)
-                                ) {
-                                    Text("Grid", fontSize = 12.sp)
-                                }
-                                Button(
-                                    onClick = { isGridView = false },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (!isGridView) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                        contentColor = if (!isGridView) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                                    ),
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                                    modifier = Modifier.height(32.dp)
-                                ) {
-                                    Text("List", fontSize = 12.sp)
-                                }
-                            }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
-                    )
-                }
-            ) { padding ->
-                if (allMedia.isEmpty()) {
-                    Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                        Text("No shared media found in this chat.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(padding)
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        if (isGridView) {
-                            val rows = allMedia.chunked(3)
+            Tab(selected = selectedFolder == "all", onClick = { selectedFolder = "all" }, text = { Text("📁 All (${allMediaItems.size})") })
+            Tab(selected = selectedFolder == "images", onClick = { selectedFolder = "images" }, text = { Text("📷 Images (${allMediaItems.count { it.type == "image" }})") })
+            Tab(selected = selectedFolder == "videos", onClick = { selectedFolder = "videos" }, text = { Text("🎥 Videos (${allMediaItems.count { it.type == "video" }})") })
+            Tab(selected = selectedFolder == "audio", onClick = { selectedFolder = "audio" }, text = { Text("🎤 Audio (${allMediaItems.count { it.type == "audio" }})") })
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("${displayedItems.size} items", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Button(
+                    onClick = { viewMode = "grid" },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (viewMode == "grid") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = if (viewMode == "grid") MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                    ),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                    modifier = Modifier.height(30.dp)
+                ) { Text("Grid", fontSize = 11.sp) }
+
+                Button(
+                    onClick = { viewMode = "list" },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (viewMode == "list") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = if (viewMode == "list") MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                    ),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                    modifier = Modifier.height(30.dp)
+                ) { Text("List", fontSize = 11.sp) }
+
+                Button(
+                    onClick = { viewMode = "slide" },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (viewMode == "slide") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = if (viewMode == "slide") MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                    ),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                    modifier = Modifier.height(30.dp)
+                ) { Text("Slide", fontSize = 11.sp) }
+            }
+        }
+
+        if (displayedItems.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize().weight(1f), contentAlignment = Alignment.Center) {
+                Text("No media found in this folder.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        } else {
+            Box(modifier = Modifier.fillMaxSize().weight(1f)) {
+                when (viewMode) {
+                    "grid" -> {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            val rows = displayedItems.chunked(3)
                             items(rows) { rowItems ->
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    for ((url, type) in rowItems) {
+                                    for (item in rowItems) {
                                         Box(
                                             modifier = Modifier
                                                 .weight(1f)
                                                 .aspectRatio(1f)
                                                 .clip(RoundedCornerShape(8.dp))
                                                 .background(Color(0xFF1E222A))
-                                                .clickable { onMediaClick(url) },
+                                                .clickable { onMediaClick(item.url, item.type) },
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            AsyncImage(
-                                                model = url,
-                                                contentDescription = null,
-                                                modifier = Modifier.fillMaxSize(),
-                                                contentScale = ContentScale.Crop
-                                            )
-                                            if (type == "video") {
-                                                Surface(
-                                                    shape = CircleShape,
-                                                    color = Color.Black.copy(alpha = 0.6f),
-                                                    modifier = Modifier.size(32.dp)
+                                            if (item.type == "audio") {
+                                                Column(
+                                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                                    modifier = Modifier.padding(4.dp)
                                                 ) {
-                                                    Box(contentAlignment = Alignment.Center) {
-                                                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                                                    Text("🎤", fontSize = 24.sp)
+                                                    Spacer(modifier = Modifier.height(4.dp))
+                                                    Text("Audio", fontSize = 10.sp, color = Color.White, maxLines = 1)
+                                                }
+                                            } else {
+                                                AsyncImage(
+                                                    model = item.url,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.fillMaxSize(),
+                                                    contentScale = ContentScale.Crop
+                                                )
+                                                if (item.type == "video") {
+                                                    Surface(
+                                                        shape = CircleShape,
+                                                        color = Color.Black.copy(alpha = 0.6f),
+                                                        modifier = Modifier.size(28.dp)
+                                                    ) {
+                                                        Box(contentAlignment = Alignment.Center) {
+                                                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                                        }
                                                     }
                                                 }
                                             }
@@ -1984,12 +2031,18 @@ fun SharedMediaGalleryDialog(
                                     }
                                 }
                             }
-                        } else {
-                            items(allMedia) { (url, type) ->
+                        }
+                    }
+                    "list" -> {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(displayedItems) { item ->
                                 Card(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clickable { onMediaClick(url) },
+                                        .clickable { onMediaClick(item.url, item.type) },
                                     shape = RoundedCornerShape(12.dp),
                                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                                 ) {
@@ -2002,41 +2055,282 @@ fun SharedMediaGalleryDialog(
                                     ) {
                                         Box(
                                             modifier = Modifier
-                                                .size(70.dp)
+                                                .size(60.dp)
                                                 .clip(RoundedCornerShape(8.dp))
                                                 .background(Color(0xFF1E222A)),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            AsyncImage(
-                                                model = url,
-                                                contentDescription = null,
-                                                modifier = Modifier.fillMaxSize(),
-                                                contentScale = ContentScale.Crop
-                                            )
-                                            if (type == "video") {
-                                                Surface(
-                                                    shape = CircleShape,
-                                                    color = Color.Black.copy(alpha = 0.6f),
-                                                    modifier = Modifier.size(28.dp)
-                                                ) {
-                                                    Box(contentAlignment = Alignment.Center) {
-                                                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                            if (item.type == "audio") {
+                                                Text("🎤", fontSize = 24.sp)
+                                            } else {
+                                                AsyncImage(
+                                                    model = item.url,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.fillMaxSize(),
+                                                    contentScale = ContentScale.Crop
+                                                )
+                                                if (item.type == "video") {
+                                                    Surface(
+                                                        shape = CircleShape,
+                                                        color = Color.Black.copy(alpha = 0.6f),
+                                                        modifier = Modifier.size(24.dp)
+                                                    ) {
+                                                        Box(contentAlignment = Alignment.Center) {
+                                                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
-                                        Column {
+                                        Column(modifier = Modifier.weight(1f)) {
                                             Text(
-                                                text = if (type == "video") "🎥 Video Attachment" else "📷 Photo Attachment",
+                                                text = when (item.type) {
+                                                    "video" -> "🎥 Video File"
+                                                    "audio" -> "🎤 Voice Message / Audio"
+                                                    else -> "📷 Photo Image"
+                                                },
                                                 fontWeight = FontWeight.Bold,
-                                                fontSize = 15.sp
+                                                fontSize = 14.sp
                                             )
                                             Text(
-                                                text = "Tap to view full screen & download",
+                                                text = "Tap to view / play",
                                                 fontSize = 12.sp,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "slide" -> {
+                        val pagerState = rememberPagerState { displayedItems.size }
+                        val context = LocalContext.current
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            HorizontalPager(
+                                state = pagerState,
+                                modifier = Modifier.fillMaxSize()
+                            ) { pageIndex ->
+                                val item = displayedItems[pageIndex]
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (item.type == "audio") {
+                                        Card(
+                                            modifier = Modifier
+                                                .fillMaxWidth(0.9f)
+                                                .padding(16.dp),
+                                            shape = RoundedCornerShape(16.dp),
+                                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                                        ) {
+                                            Column(
+                                                modifier = Modifier.padding(20.dp),
+                                                horizontalAlignment = Alignment.CenterHorizontally
+                                            ) {
+                                                Text("🎤 Voice Message / Audio", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                                Spacer(modifier = Modifier.height(16.dp))
+                                                VoiceMessagePlayer(audioUrl = item.url)
+                                            }
+                                        }
+                                    } else if (item.type == "video") {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .clickable { onMediaClick(item.url, item.type) },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            AsyncImage(
+                                                model = item.url,
+                                                contentDescription = null,
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.Fit
+                                            )
+                                            Surface(
+                                                shape = CircleShape,
+                                                color = Color.Black.copy(alpha = 0.6f),
+                                                modifier = Modifier.size(64.dp)
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(36.dp))
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        AsyncImage(
+                                            model = item.url,
+                                            contentDescription = null,
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Fit
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Top overlay with Page Indicator and Download button
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp)
+                                    .align(Alignment.TopCenter),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = Color.Black.copy(alpha = 0.6f)
+                                ) {
+                                    Text(
+                                        text = "${pagerState.currentPage + 1} / ${displayedItems.size}",
+                                        color = Color.White,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                                    )
+                                }
+
+                                val currentItem = displayedItems.getOrNull(pagerState.currentPage)
+                                if (currentItem != null) {
+                                    Button(
+                                        onClick = {
+                                            downloadMedia(context, currentItem.url, currentItem.type == "video")
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                                    ) {
+                                        Text("Download")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ChatInfoDialog(
+    recipientName: String,
+    recipientPhoto: String,
+    presence: String,
+    lastSeen: Long,
+    messages: List<Message>,
+    onDismiss: () -> Unit,
+    onOpenNickname: () -> Unit,
+    onOpenTheme: () -> Unit,
+    onOpenCreateGroup: () -> Unit,
+    onMediaClick: (String, String) -> Unit
+) {
+    var selectedTab by remember { mutableStateOf(0) } // 0: Shared Media, 1: Chat Options
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background
+        ) {
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = { Text(recipientName, fontWeight = FontWeight.Bold) },
+                        navigationIcon = {
+                            IconButton(onClick = onDismiss) {
+                                Icon(Icons.Default.Close, contentDescription = "Close")
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                    )
+                }
+            ) { padding ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f))
+                            .padding(16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Surface(
+                                modifier = Modifier.size(80.dp),
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primaryContainer
+                            ) {
+                                if (recipientPhoto.isNotBlank()) {
+                                    AsyncImage(model = recipientPhoto, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                } else {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(recipientName.take(1).uppercase(), fontSize = 32.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(text = recipientName, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                            Text(text = formatLastSeen(presence, lastSeen), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+
+                    TabRow(selectedTabIndex = selectedTab) {
+                        Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Shared Media") })
+                        Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("Chat Options") })
+                    }
+
+                    Box(modifier = Modifier.fillMaxSize().weight(1f)) {
+                        when (selectedTab) {
+                            0 -> {
+                                SharedMediaFolderGallery(messages = messages, onMediaClick = onMediaClick)
+                            }
+                            1 -> {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(24.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Text("Chat Settings & Options", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                    Spacer(modifier = Modifier.height(8.dp))
+
+                                    Button(
+                                        onClick = {
+                                            onDismiss()
+                                            onOpenNickname()
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("✏️ Edit Nickname")
+                                    }
+
+                                    Button(
+                                        onClick = {
+                                            onDismiss()
+                                            onOpenTheme()
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("🎨 Change Chat Theme")
+                                    }
+
+                                    Button(
+                                        onClick = {
+                                            onDismiss()
+                                            onOpenCreateGroup()
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("👥 Create Group with $recipientName")
                                     }
                                 }
                             }
@@ -2350,4 +2644,221 @@ fun formatMillis(millis: Int): String {
     val seconds = (millis / 1000) % 60
     val minutes = (millis / (1000 * 60)) % 60
     return String.format(Locale.getDefault(), "%d:%02d", minutes, seconds)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AlbumGridDialog(
+    urls: List<String>,
+    onDismiss: () -> Unit,
+    onImageClick: (Int) -> Unit
+) {
+    var viewMode by remember { mutableStateOf("grid") } // "grid", "list", "slide"
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .wrapContentHeight()
+                .heightIn(min = 250.dp, max = 620.dp),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.background,
+            tonalElevation = 6.dp
+        ) {
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = { Text("Media Album (${urls.size})", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+                        navigationIcon = {
+                            IconButton(onClick = onDismiss) {
+                                Icon(Icons.Default.Close, contentDescription = "Close")
+                            }
+                        },
+                        actions = {
+                            Row(
+                                modifier = Modifier.padding(end = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Button(
+                                    onClick = { viewMode = "grid" },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (viewMode == "grid") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                        contentColor = if (viewMode == "grid") MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                    modifier = Modifier.height(28.dp)
+                                ) { Text("Grid", fontSize = 10.sp) }
+
+                                Button(
+                                    onClick = { viewMode = "list" },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (viewMode == "list") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                        contentColor = if (viewMode == "list") MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                    modifier = Modifier.height(28.dp)
+                                ) { Text("List", fontSize = 10.sp) }
+
+                                Button(
+                                    onClick = { viewMode = "slide" },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (viewMode == "slide") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                        contentColor = if (viewMode == "slide") MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                    modifier = Modifier.height(28.dp)
+                                ) { Text("Slide", fontSize = 10.sp) }
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                    )
+                }
+            ) { padding ->
+                when (viewMode) {
+                    "grid" -> {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(padding)
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            val rows = urls.chunked(3)
+                            items(rows.size) { rowIndex ->
+                                val rowItems = rows[rowIndex]
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    for ((colIndex, url) in rowItems.withIndex()) {
+                                        val absoluteIndex = rowIndex * 3 + colIndex
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .aspectRatio(1f)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color(0xFF1E222A))
+                                                .clickable { onImageClick(absoluteIndex) },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            AsyncImage(
+                                                model = url,
+                                                contentDescription = null,
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                        }
+                                    }
+                                    repeat(3 - rowItems.size) {
+                                        Spacer(modifier = Modifier.weight(1f))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "list" -> {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(padding)
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(urls.size) { idx ->
+                                val url = urls[idx]
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onImageClick(idx) },
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(60.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color(0xFF1E222A)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            AsyncImage(
+                                                model = url,
+                                                contentDescription = null,
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                        }
+                                        Column {
+                                            Text(
+                                                text = "📷 Photo #${idx + 1}",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 14.sp
+                                            )
+                                            Text(
+                                                text = "Tap to view full screen",
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "slide" -> {
+                        val pagerState = rememberPagerState { urls.size }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(padding)
+                                .background(Color.Black),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            HorizontalPager(
+                                state = pagerState,
+                                modifier = Modifier.fillMaxSize()
+                            ) { pageIndex ->
+                                val url = urls[pageIndex]
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clickable { onImageClick(pageIndex) },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    AsyncImage(
+                                        model = url,
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Fit
+                                    )
+                                }
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = Color.Black.copy(alpha = 0.6f),
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(16.dp)
+                            ) {
+                                Text(
+                                    text = "${pagerState.currentPage + 1} / ${urls.size}",
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
