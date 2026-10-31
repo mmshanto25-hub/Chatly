@@ -442,41 +442,7 @@ class ChatRepository {
         } catch (_: Exception) {}
     }
 
-    suspend fun togglePinMessage(conversationId: String, messageId: String, isCurrentlyPinned: Boolean, messageText: String) {
-        val db = firestore ?: return
-        try {
-            val newPinnedState = !isCurrentlyPinned
-            db.collection("conversations")
-                .document(conversationId)
-                .collection("messages")
-                .document(messageId)
-                .update("isPinned", newPinnedState)
-                .await()
 
-            if (newPinnedState) {
-                db.collection("conversations")
-                    .document(conversationId)
-                    .update(
-                        mapOf(
-                            "pinnedMessageId" to messageId,
-                            "pinnedMessageText" to messageText
-                        )
-                    ).await()
-            } else {
-                val convDoc = db.collection("conversations").document(conversationId).get().await()
-                if (convDoc.getString("pinnedMessageId") == messageId) {
-                    db.collection("conversations")
-                        .document(conversationId)
-                        .update(
-                            mapOf(
-                                "pinnedMessageId" to "",
-                                "pinnedMessageText" to ""
-                            )
-                        ).await()
-                }
-            }
-        } catch (_: Exception) {}
-    }
 
     suspend fun deleteMessage(conversationId: String, messageId: String) {
         val db = firestore ?: return
