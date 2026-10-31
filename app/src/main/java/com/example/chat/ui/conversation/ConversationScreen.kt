@@ -1326,7 +1326,7 @@ fun ConversationScreen(
 
     LaunchedEffect(uiState.messages.size) {
         if (uiState.messages.isNotEmpty()) {
-            listState.animateScrollToItem(uiState.messages.size - 1)
+            listState.animateScrollToItem(0)
         }
     }
 
@@ -1588,6 +1588,8 @@ fun ConversationScreen(
         val bubbleColorOther = getThemeBubbleColor(themeColor, false)
         val bgColor = getThemeBackgroundColor(themeColor)
 
+        val reversedMessages = remember(uiState.messages) { uiState.messages.reversed() }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -1596,6 +1598,7 @@ fun ConversationScreen(
         ) {
             LazyColumn(
                 state = listState,
+                reverseLayout = true,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(horizontal = 16.dp),
@@ -1604,7 +1607,7 @@ fun ConversationScreen(
                 item { Spacer(modifier = Modifier.height(8.dp)) }
 
                 items(
-                    items = uiState.messages,
+                    items = reversedMessages,
                     key = { it.messageId }
                 ) { msg ->
                     val isMe = (msg.senderId == currentUserId)

@@ -35,7 +35,7 @@ fun ChatNavGraph() {
                         popUpTo("login") { inclusive = true }
                     }
                 },
-                onNavRegister = { navController.navigate("register") }
+                onNavRegister = { navController.navigate("register") },
             )
         }
         composable("register") {
