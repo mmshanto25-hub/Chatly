@@ -316,21 +316,22 @@ class ConversationViewModel(
             _uiState.update { it.copy(isUploading = true, uploadProgress = 0) }
             try {
                 val total = uris.size
-                val imageVideoUris = mutableListOf<Uri>()
+                val imageUris = mutableListOf<Uri>()
+                val videoUris = mutableListOf<Uri>()
                 val audioUris = mutableListOf<Uri>()
 
                 uris.forEach { uri ->
                     val mimeType = context.contentResolver.getType(uri) ?: ""
                     val path = uri.toString().lowercase()
-                    val type = if (mimeType.startsWith("audio", ignoreCase = true) || path.endsWith(".3gp") || path.endsWith(".m4a") || path.endsWith(".mp3") || path.endsWith(".wav") || path.endsWith(".aac")) {
-                        "audio"
-                    } else {
-                        "image_or_video"
-                    }
-                    if (type == "audio") {
+                    val isAudio = mimeType.startsWith("audio", ignoreCase = true) || path.endsWith(".3gp") || path.endsWith(".m4a") || path.endsWith(".mp3") || path.endsWith(".wav") || path.endsWith(".aac")
+                    val isVideo = mimeType.startsWith("video", ignoreCase = true) || path.endsWith(".mp4") || path.endsWith(".mov") || path.endsWith(".mkv") || path.endsWith(".webm")
+
+                    if (isAudio) {
                         audioUris.add(uri)
+                    } else if (isVideo) {
+                        videoUris.add(uri)
                     } else {
-                        imageVideoUris.add(uri)
+                        imageUris.add(uri)
                     }
                 }
 
@@ -339,61 +340,64 @@ class ConversationViewModel(
                     uploadAndSendSingleItem(context, audioUri, "audio")
                 }
 
-                // 2. Bundle image/video files into a media_group if > 1, or single if 1
-                if (imageVideoUris.isNotEmpty()) {
-                    val downloadUrls = mutableListOf<String>()
-                    imageVideoUris.forEachIndexed { index, uri ->
-                        val progressPercent = ((index + 1) * 100) / total
-                        _uiState.update { it.copy(uploadProgress = progressPercent) }
+                // 2. Send video files individually
+                for (videoUri in videoUris) {
+                    uploadAndSendSingleItem(context, videoUri, "video")
+                }
 
-                        val downloadUrl = CloudinaryUploader.uploadToCloudinary(
-                            context = context,
-                            imageUri = uri,
-                            cloudName = "tmtqcamm",
-                            uploadPreset = "chatly_unsigned"
-                        )
-                        if (downloadUrl != null) {
-                            downloadUrls.add(downloadUrl)
+                // 3. Send image files (single as "image", multiple as "media_group")
+                if (imageUris.isNotEmpty()) {
+                    if (imageUris.size == 1) {
+                        uploadAndSendSingleItem(context, imageUris.first(), "image")
+                    } else {
+                        val downloadUrls = mutableListOf<String>()
+                        imageUris.forEachIndexed { index, uri ->
+                            val progressPercent = ((index + 1) * 100) / total
+                            _uiState.update { it.copy(uploadProgress = progressPercent) }
+
+                            val downloadUrl = CloudinaryUploader.uploadToCloudinary(
+                                context = context,
+                                imageUri = uri,
+                                cloudName = "tmtqcamm",
+                                uploadPreset = "chatly_unsigned"
+                            )
+                            if (downloadUrl != null) {
+                                downloadUrls.add(downloadUrl)
+                            }
                         }
-                    }
 
-                    if (downloadUrls.isNotEmpty()) {
-                        val isMultiple = downloadUrls.size > 1
-                        val firstUriStr = imageVideoUris.firstOrNull()?.toString()?.lowercase() ?: ""
-                        val isVideo = firstUriStr.contains("video") || firstUriStr.endsWith(".mp4") || firstUriStr.endsWith(".mov") || firstUriStr.endsWith(".mkv") || firstUriStr.endsWith(".webm")
+                        if (downloadUrls.isNotEmpty()) {
+                            val textSummary = "📷 Media Album (${downloadUrls.size})"
+                            val msgRef = firestore.collection("conversations")
+                                .document(conversationId)
+                                .collection("messages")
+                                .document()
 
-                        val messageType = if (isMultiple) "media_group" else if (isVideo) "video" else "image"
-                        val textSummary = if (isMultiple) "📷 Media Album (${downloadUrls.size})" else if (isVideo) "📹 Video" else "📷 Photo"
+                            val messageId = msgRef.id
+                            val message = Message(
+                                messageId = messageId,
+                                conversationId = conversationId,
+                                senderId = currentUserId,
+                                text = textSummary,
+                                messageType = "media_group",
+                                attachmentUrl = downloadUrls.firstOrNull() ?: "",
+                                attachmentUrls = downloadUrls,
+                                createdAt = System.currentTimeMillis()
+                            )
 
-                        val msgRef = firestore.collection("conversations")
-                            .document(conversationId)
-                            .collection("messages")
-                            .document()
+                            msgRef.set(message).await()
 
-                        val messageId = msgRef.id
-                        val message = Message(
-                            messageId = messageId,
-                            conversationId = conversationId,
-                            senderId = currentUserId,
-                            text = textSummary,
-                            messageType = messageType,
-                            attachmentUrl = downloadUrls.firstOrNull() ?: "",
-                            attachmentUrls = if (isMultiple) downloadUrls else emptyList(),
-                            createdAt = System.currentTimeMillis()
-                        )
-
-                        msgRef.set(message).await()
-
-                        firestore.collection("conversations")
-                            .document(conversationId)
-                            .update(
-                                mapOf(
-                                    "lastMessage" to textSummary,
-                                    "lastMessageAt" to System.currentTimeMillis(),
-                                    "lastMessageSenderId" to currentUserId,
-                                    "updatedAt" to System.currentTimeMillis()
-                                )
-                            ).await()
+                            firestore.collection("conversations")
+                                .document(conversationId)
+                                .update(
+                                    mapOf(
+                                        "lastMessage" to textSummary,
+                                        "lastMessageAt" to System.currentTimeMillis(),
+                                        "lastMessageSenderId" to currentUserId,
+                                        "updatedAt" to System.currentTimeMillis()
+                                    )
+                                ).await()
+                        }
                     }
                 }
             } catch (_: Exception) {

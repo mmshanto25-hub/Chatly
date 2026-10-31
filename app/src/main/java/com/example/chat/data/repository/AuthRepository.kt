@@ -26,9 +26,14 @@ class AuthRepository {
 
     fun isUserLoggedIn(): Boolean = try { auth?.currentUser != null } catch (_: Exception) { false }
 
-    suspend fun login(email: String, password: String): Result<Unit> {
+    suspend fun login(emailOrUsername: String, password: String): Result<Unit> {
         val a = auth ?: return Result.failure(Exception("Firebase Auth is not initialized. Please add your google-services.json file."))
         return try {
+            val email = if (!emailOrUsername.contains("@")) {
+                "${emailOrUsername.trim()}@talky.com"
+            } else {
+                emailOrUsername.trim()
+            }
             a.signInWithEmailAndPassword(email, password).await()
             updateUserPresence("online")
             Result.success(Unit)
