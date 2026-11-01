@@ -31,6 +31,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
@@ -75,7 +76,8 @@ fun ConversationScreen(
     viewModel: ConversationViewModel,
     recipientName: String,
     onNavBack: () -> Unit,
-    onNavToChat: ((conversationId: String, recipientId: String, recipientName: String) -> Unit)? = null
+    onNavToChat: ((conversationId: String, recipientId: String, recipientName: String) -> Unit)? = null,
+    onNavToCall: (() -> Unit)? = null
 ) {
     val activeConversationId = viewModel.conversationId
     DisposableEffect(activeConversationId) {
@@ -1372,7 +1374,14 @@ fun ConversationScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { /* Call action */ }) {
+                    IconButton(onClick = {
+                        onNavToCall?.invoke()
+                    }) {
+                        Icon(Icons.Default.Videocam, contentDescription = "Video Call", tint = getThemeTopAppBarContentColor(themeColor))
+                    }
+                    IconButton(onClick = {
+                        onNavToCall?.invoke()
+                    }) {
                         Icon(Icons.Default.Call, contentDescription = "Call", tint = getThemeTopAppBarContentColor(themeColor))
                     }
                     IconButton(
@@ -1570,7 +1579,8 @@ fun ConversationScreen(
 
                 items(
                     items = reversedMessages,
-                    key = { it.messageId }
+                    key = { it.messageId },
+                    contentType = { if (it.messageType == "system") "system" else if (it.senderId == currentUserId) "me" else "other" }
                 ) { msg ->
                     val isMe = (msg.senderId == currentUserId)
                     val isSystem = (msg.messageType == "system")

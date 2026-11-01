@@ -265,7 +265,8 @@ fun ChatListScreen(
                     ) {
                         items(
                             items = uiState.filteredConversations,
-                            key = { it.conversationId }
+                            key = { it.conversationId },
+                            contentType = { "conversation_item" }
                         ) { conversation ->
                             val recipientId = conversation.participantIds.firstOrNull { it != currentUserId } ?: ""
                             val title = conversation.getTitle(currentUserId)
