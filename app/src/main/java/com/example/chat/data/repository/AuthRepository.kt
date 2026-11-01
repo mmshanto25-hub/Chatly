@@ -35,7 +35,7 @@ class AuthRepository {
                 emailOrUsername.trim()
             }
             a.signInWithEmailAndPassword(email, password).await()
-            updateUserPresence("online")
+            ensureUserExistsInFirestore()
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -93,11 +93,32 @@ class AuthRepository {
     }
 
     suspend fun getCurrentUserData(): User? {
+        return ensureUserExistsInFirestore()
+    }
+
+    suspend fun ensureUserExistsInFirestore(): User? {
         val uid = currentUserId ?: return null
         val db = firestore ?: return null
+        val email = currentUserEmail ?: ""
         return try {
             val snapshot = db.collection("users").document(uid).get().await()
-            snapshot.toObject(User::class.java)
+            if (snapshot.exists()) {
+                snapshot.toObject(User::class.java)
+            } else {
+                val displayName = auth?.currentUser?.displayName.orEmpty().ifBlank { email.substringBefore("@") }
+                val username = email.substringBefore("@")
+                val newUser = User(
+                    uid = uid,
+                    displayName = displayName,
+                    email = email,
+                    username = username,
+                    createdAt = System.currentTimeMillis(),
+                    lastSeenAt = System.currentTimeMillis(),
+                    presence = "online"
+                )
+                db.collection("users").document(uid).set(newUser).await()
+                newUser
+            }
         } catch (_: Exception) {
             null
         }

@@ -5,14 +5,17 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -32,10 +35,19 @@ fun UserSearchScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Find Users", fontWeight = FontWeight.Bold) },
+                title = {
+                    Column {
+                        Text("Users List", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Text(
+                            text = "${uiState.searchResults.size} registered users",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                        )
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onNavBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
@@ -51,28 +63,36 @@ fun UserSearchScreen(
             OutlinedTextField(
                 value = uiState.searchQuery,
                 onValueChange = { viewModel.updateSearchQuery(it) },
-                label = { Text("Search by name or email") },
+                label = { Text("Search users by name or email") },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 singleLine = true,
+                shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth()
             )
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            if (uiState.isLoading) {
+            if (uiState.isLoading && uiState.allUsers.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
             } else if (uiState.searchResults.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
-                        text = "No users found",
+                        text = "No other users found",
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             } else {
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    items(uiState.searchResults) { user ->
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    items(
+                        items = uiState.searchResults,
+                        key = { it.uid },
+                        contentType = { "user_item" }
+                    ) { user ->
                         UserItem(
                             user = user,
                             onClick = {
@@ -103,7 +123,7 @@ fun UserItem(
     ) {
         Surface(
             modifier = Modifier
-                .size(48.dp)
+                .size(52.dp)
                 .clip(CircleShape),
             color = MaterialTheme.colorScheme.primaryContainer
         ) {
@@ -111,14 +131,15 @@ fun UserItem(
                 AsyncImage(
                     model = user.photoUrl,
                     contentDescription = "Profile Picture",
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
                 )
             } else {
                 Box(contentAlignment = Alignment.Center) {
                     Text(
                         text = user.displayName.take(1).uppercase(Locale.getDefault()),
                         fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp,
+                        fontSize = 20.sp,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 }
@@ -127,7 +148,7 @@ fun UserItem(
 
         Spacer(modifier = Modifier.width(16.dp))
 
-        Column {
+        Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = user.displayName,
                 fontWeight = FontWeight.Bold,
@@ -136,9 +157,17 @@ fun UserItem(
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = user.email,
+                text = if (user.username.isNotBlank()) "@${user.username}" else user.email,
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        IconButton(onClick = onClick) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.Chat,
+                contentDescription = "Message",
+                tint = MaterialTheme.colorScheme.primary
             )
         }
     }
