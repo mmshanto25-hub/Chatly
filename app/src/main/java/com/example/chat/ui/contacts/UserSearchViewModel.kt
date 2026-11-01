@@ -32,19 +32,27 @@ class UserSearchViewModel : ViewModel() {
     }
 
     private fun loadAllUsers() {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
-            try {
-                val snapshot = try {
-                    firestore.collection("users").get(com.google.firebase.firestore.Source.SERVER).await()
-                } catch (_: Exception) {
-                    firestore.collection("users").get().await()
-                }
+        _uiState.update { it.copy(isLoading = true) }
+        firestore.collection("users").addSnapshotListener { snapshot, error ->
+            if (error != null) {
+                _uiState.update { it.copy(isLoading = false, errorMessage = error.localizedMessage) }
+                return@addSnapshotListener
+            }
+            if (snapshot != null) {
                 val users = snapshot.documents.mapNotNull { it.toObject(User::class.java) }
                     .filter { it.uid != currentUserId }
-                _uiState.update { it.copy(allUsers = users, searchResults = users, isLoading = false) }
-            } catch (e: Exception) {
-                _uiState.update { it.copy(isLoading = false, errorMessage = e.localizedMessage) }
+                _uiState.update { state ->
+                    val trimmed = state.searchQuery.trim().lowercase(Locale.getDefault())
+                    val filtered = if (trimmed.isBlank()) {
+                        users
+                    } else {
+                        users.filter { user ->
+                            user.displayName.lowercase(Locale.getDefault()).contains(trimmed) ||
+                            user.email.lowercase(Locale.getDefault()).contains(trimmed)
+                        }
+                    }
+                    state.copy(allUsers = users, searchResults = filtered, isLoading = false)
+                }
             }
         }
     }
