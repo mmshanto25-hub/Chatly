@@ -103,7 +103,13 @@ fun ChatNavGraph() {
                     navController.navigate("conversation/$convId/$recipientId/$name") {
                         popUpTo("chats")
                     }
-                }
+                },
+                onNavToCall = { navController.navigate("test_call") }
+            )
+        }
+        composable("test_call") {
+            com.example.chat.ui.call.TestCallScreen(
+                onNavBack = { navController.popBackStack() }
             )
         }
         composable("profile") {

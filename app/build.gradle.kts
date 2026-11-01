@@ -59,6 +59,7 @@ dependencies {
     implementation(libs.compose.ui.graphics)
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.compose.material3)
+    implementation("androidx.compose.material:material-icons-extended")
     implementation(libs.activity.compose)
     implementation(libs.navigation.compose)
     implementation(libs.lifecycle.viewmodel.compose)
@@ -80,6 +81,9 @@ dependencies {
     // Coil
     implementation(libs.coil.compose)
     implementation("io.coil-kt:coil-video:2.7.0")
+
+    // Agora RTC SDK
+    implementation("io.agora.rtc:full-sdk:4.3.0")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.ext.junit)
