@@ -21,8 +21,6 @@ data class ConversationUiState(
     val messages: List<Message> = emptyList(),
     val conversation: Conversation? = null,
     val recipientPhoto: String = "",
-    val recipientPresence: String = "offline",
-    val recipientLastSeen: Long = 0L,
     val isLoading: Boolean = true,
     val messageInput: String = "",
     val isUploading: Boolean = false,
@@ -70,9 +68,7 @@ class ConversationViewModel(
                                 if (user != null) {
                                     _uiState.update {
                                         it.copy(
-                                            recipientPhoto = user.photoUrl.ifBlank { recipientPhoto },
-                                            recipientPresence = user.presence,
-                                            recipientLastSeen = user.lastSeenAt
+                                            recipientPhoto = user.photoUrl.ifBlank { recipientPhoto }
                                         )
                                     }
                                 }
