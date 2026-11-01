@@ -1,7 +1,7 @@
 package com.example.chat.ui.conversation
 
 import android.Manifest
-import android.app.DownloadManager
+
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -36,7 +36,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -60,110 +60,14 @@ import coil.compose.AsyncImage
 import com.example.chat.core.utils.CloudinaryUploader
 import com.example.chat.data.model.Message
 import com.example.chat.data.model.User
+import com.example.chat.ui.conversation.components.*
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.io.File
 import java.util.Calendar
 import java.util.Locale
-
-fun formatLastSeen(presence: String, lastSeenAt: Long): String {
-    if (presence.equals("online", ignoreCase = true)) return "online"
-    if (lastSeenAt == 0L) return "offline"
-    val diff = System.currentTimeMillis() - lastSeenAt
-    val minutes = diff / (1000 * 60)
-    val hours = minutes / 60
-    val days = hours / 24
-    return when {
-        minutes < 1 -> "last seen just now"
-        minutes < 60 -> "last seen ${minutes}m ago"
-        hours < 24 -> "last seen ${hours}h ago"
-        days < 7 -> "last seen ${days}d ago"
-        else -> "last seen recently"
-    }
-}
-
-fun getThemeBubbleColor(theme: String, isMe: Boolean): Color {
-    return when (theme) {
-        "dark" -> if (isMe) Color(0xFF4E6178) else Color(0xFF313D4A)
-        "green" -> if (isMe) Color(0xFFC8E6C9) else Color(0xFFE8F5E9)
-        "orange" -> if (isMe) Color(0xFFFFE0B2) else Color(0xFFFFF3E0)
-        "purple" -> if (isMe) Color(0xFFE1BEE7) else Color(0xFFF3E5F5)
-        "pink" -> if (isMe) Color(0xFFF8BBD0) else Color(0xFFFCE4EC)
-        else -> if (isMe) Color(0xFFD1E4FF) else Color(0xFFEFEFEF)
-    }
-}
-
-fun getThemeBackgroundColor(theme: String): Color {
-    return when (theme) {
-        "dark" -> Color(0xFF222831)
-        "green" -> Color(0xFFF1F8E9)
-        "orange" -> Color(0xFFFFF8E1)
-        "purple" -> Color(0xFFFCE4EC)
-        "pink" -> Color(0xFFFFEBEE)
-        else -> Color(0xFFF7F9FC)
-    }
-}
-
-fun getThemeTopAppBarColor(theme: String): Color {
-    return when (theme) {
-        "dark" -> Color(0xFF2E3842)
-        "green" -> Color(0xFFA5D6A7)
-        "orange" -> Color(0xFFFFCC80)
-        "purple" -> Color(0xFFE1BEE7)
-        "pink" -> Color(0xFFF8BBD0)
-        else -> Color(0xFFD1E4FF)
-    }
-}
-
-fun getThemeTopAppBarContentColor(theme: String): Color {
-    return when (theme) {
-        "dark" -> Color.White
-        else -> Color(0xFF1A1A1A)
-    }
-}
-
-fun getThemeBottomBarColor(theme: String): Color {
-    return when (theme) {
-        "dark" -> Color(0xFF2E3842)
-        "green" -> Color(0xFFC8E6C9)
-        "orange" -> Color(0xFFFFE0B2)
-        "purple" -> Color(0xFFE8D5F5)
-        "pink" -> Color(0xFFFCE4EC)
-        else -> Color(0xFFF7F9FC)
-    }
-}
-
-fun getThemeBottomBarContentColor(theme: String): Color {
-    return when (theme) {
-        "dark" -> Color.White
-        else -> Color(0xFF1A1A1A)
-    }
-}
-
-fun downloadMedia(context: Context, mediaUrl: String, isVideo: Boolean) {
-    try {
-        val ext = if (isVideo) "mp4" else "jpg"
-        val title = if (isVideo) "Video File" else "Image File"
-        val request = DownloadManager.Request(Uri.parse(mediaUrl))
-            .setTitle(title)
-            .setDescription("Downloading $title...")
-            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            .setAllowedOverMetered(true)
-            .setAllowedOverRoaming(true)
-            .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "Chatly_${System.currentTimeMillis()}.$ext")
-
-        val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        downloadManager.enqueue(request)
-        Toast.makeText(context, "Downloading $title to Downloads...", Toast.LENGTH_SHORT).show()
-    } catch (e: Exception) {
-        Toast.makeText(context, "Failed to download: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
-    }
-}
-
-fun downloadImage(context: Context, imageUrl: String) {
-    downloadMedia(context, imageUrl, false)
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -188,7 +92,6 @@ fun ConversationScreen(
     val listState = rememberLazyListState()
 
     var fullScreenImageGallery by remember { mutableStateOf<Pair<List<String>, Int>?>(null) }
-    var showMenu by remember { mutableStateOf(false) }
     var showNicknameDialog by remember { mutableStateOf(false) }
     var showThemeDialog by remember { mutableStateOf(false) }
     var showCreateGroupDialog by remember { mutableStateOf(false) }
@@ -255,8 +158,6 @@ fun ConversationScreen(
         ChatInfoDialog(
             recipientName = displayName,
             recipientPhoto = uiState.recipientPhoto,
-            presence = uiState.recipientPresence,
-            lastSeen = uiState.recipientLastSeen,
             messages = uiState.messages,
             onDismiss = { showChatInfoDialog = false },
             onOpenNickname = { showNicknameDialog = true },
@@ -685,7 +586,7 @@ fun ConversationScreen(
                                     Icon(Icons.Default.Close, contentDescription = "Close")
                                 }
                             },
-                            colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                            colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
                         )
                     }
                 ) { padding ->
@@ -1033,15 +934,19 @@ fun ConversationScreen(
         var recipientUser by remember { mutableStateOf<User?>(null) }
         var isLoadingRecipient by remember { mutableStateOf(true) }
         var isGridView by remember { mutableStateOf(true) }
+        var selectedGalleryFolder by remember { mutableStateOf("all") } // "all", "profile", "cover"
 
         LaunchedEffect(recipientId) {
             try {
                 val db = FirebaseFirestore.getInstance()
+                db.collection("users").document(recipientId)
+                    .update("profileVisitorsCount",  FieldValue.increment(1)).await()
+
                 val doc = db.collection("users").document(recipientId).get().await()
                 val u = doc.toObject(User::class.java)
                 recipientUser = u
                 if (u != null) {
-                    recipientGalleryPics = (listOf(u.photoUrl) + u.profilePictures).filter { it.isNotBlank() }.distinct()
+                    recipientGalleryPics = (listOf(u.photoUrl) + u.profilePictures + listOf(u.coverPhotoUrl) + u.coverPictures).filter { it.isNotBlank() }.distinct()
                 }
             } catch (_: Exception) {}
             isLoadingRecipient = false
@@ -1064,7 +969,7 @@ fun ConversationScreen(
                                     Icon(Icons.Default.Close, contentDescription = "Close")
                                 }
                             },
-                            colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                            colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
                         )
                     }
                 ) { padding ->
@@ -1074,49 +979,90 @@ fun ConversationScreen(
                         }
                     } else if (recipientUser != null) {
                         val u = recipientUser!!
-                        val galleryPics = recipientGalleryPics.ifEmpty { (listOf(u.photoUrl) + u.profilePictures).filter { it.isNotBlank() }.distinct() }
+                        val profilePics = (listOf(u.photoUrl) + u.profilePictures).filter { it.isNotBlank() }.distinct()
+                        val coverPics = (listOf(u.coverPhotoUrl) + u.coverPictures).filter { it.isNotBlank() }.distinct()
+                        val displayedPics = when(selectedGalleryFolder) {
+                            "profile" -> profilePics
+                            "cover" -> coverPics
+                            else -> (profilePics + coverPics).distinct()
+                        }
 
                         LazyColumn(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .padding(padding)
-                                .padding(24.dp),
+                                .padding(16.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             item {
-                                Spacer(modifier = Modifier.height(12.dp))
+                                // Cover Picture & Profile Avatar
                                 Box(
                                     modifier = Modifier
-                                        .size(110.dp)
-                                        .clip(CircleShape)
-                                        .clickable {
-                                            if (galleryPics.isNotEmpty()) fullScreenGalleryIndex = 0
-                                        },
-                                    contentAlignment = Alignment.Center
+                                        .fillMaxWidth()
+                                        .height(200.dp),
+                                    contentAlignment = Alignment.BottomCenter
                                 ) {
-                                    Surface(
-                                        modifier = Modifier.fillMaxSize(),
-                                        color = MaterialTheme.colorScheme.primaryContainer
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(150.dp)
+                                            .align(Alignment.TopCenter)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(MaterialTheme.colorScheme.primaryContainer),
+                                        contentAlignment = Alignment.Center
                                     ) {
-                                        if (u.photoUrl.isNotBlank()) {
+                                        if (u.coverPhotoUrl.isNotBlank()) {
                                             AsyncImage(
-                                                model = u.photoUrl,
-                                                contentDescription = "Profile Picture",
+                                                model = u.coverPhotoUrl,
+                                                contentDescription = "Cover Picture",
                                                 modifier = Modifier.fillMaxSize(),
                                                 contentScale = ContentScale.Crop
                                             )
                                         } else {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                Text(
-                                                    text = u.displayName.take(1).uppercase(),
-                                                    fontSize = 42.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                            Text("🌅 Cover Photo", color = MaterialTheme.colorScheme.onPrimaryContainer, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .size(100.dp)
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.surface)
+                                            .padding(3.dp)
+                                            .clip(CircleShape)
+                                            .clickable {
+                                                if (profilePics.isNotEmpty()) {
+                                                    recipientGalleryPics = displayedPics
+                                                    fullScreenGalleryIndex = 0
+                                                }
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Surface(
+                                            modifier = Modifier.fillMaxSize(),
+                                            color = MaterialTheme.colorScheme.primaryContainer
+                                        ) {
+                                            if (u.photoUrl.isNotBlank()) {
+                                                AsyncImage(
+                                                    model = u.photoUrl,
+                                                    contentDescription = "Profile Picture",
+                                                    modifier = Modifier.fillMaxSize(),
+                                                    contentScale = ContentScale.Crop
                                                 )
+                                            } else {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Text(
+                                                        text = u.displayName.take(1).uppercase(),
+                                                        fontSize = 40.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                                    )
+                                                }
                                             }
                                         }
                                     }
                                 }
+
                                 Spacer(modifier = Modifier.height(12.dp))
 
                                 Text(
@@ -1138,16 +1084,22 @@ fun ConversationScreen(
                                     fontSize = 14.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                val statusText = formatLastSeen(u.presence, u.lastSeenAt)
-                                Text(
-                                    text = statusText,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = if (u.presence.equals("online", true)) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
 
-                                Spacer(modifier = Modifier.height(28.dp))
+
+                                Spacer(modifier = Modifier.height(20.dp))
+
+                                // Folder Tabs
+                                ScrollableTabRow(
+                                    selectedTabIndex = when(selectedGalleryFolder) { "profile" -> 1; "cover" -> 2; else -> 0 },
+                                    edgePadding = 0.dp,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Tab(selected = selectedGalleryFolder == "all", onClick = { selectedGalleryFolder = "all" }, text = { Text("🖼️ All (${(profilePics + coverPics).distinct().size})") })
+                                    Tab(selected = selectedGalleryFolder == "profile", onClick = { selectedGalleryFolder = "profile" }, text = { Text("👤 Profile (${profilePics.size})") })
+                                    Tab(selected = selectedGalleryFolder == "cover", onClick = { selectedGalleryFolder = "cover" }, text = { Text("🌅 Cover (${coverPics.size})") })
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
 
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -1155,9 +1107,9 @@ fun ConversationScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = "Profile Gallery (${galleryPics.size})",
+                                        text = "Gallery (${displayedPics.size})",
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = 16.sp
+                                        fontSize = 15.sp
                                     )
                                     Row(
                                         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -1190,7 +1142,7 @@ fun ConversationScreen(
                                 Spacer(modifier = Modifier.height(12.dp))
                             }
 
-                            if (galleryPics.isEmpty()) {
+                            if (displayedPics.isEmpty()) {
                                 item {
                                     Box(
                                         modifier = Modifier
@@ -1199,7 +1151,7 @@ fun ConversationScreen(
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(
-                                            text = "No profile pictures in gallery.",
+                                            text = "No pictures in gallery.",
                                             fontSize = 13.sp,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -1207,7 +1159,7 @@ fun ConversationScreen(
                                 }
                             } else {
                                 if (isGridView) {
-                                    val rows = galleryPics.chunked(3)
+                                    val rows = displayedPics.chunked(3)
                                     items(rows) { rowImages ->
                                         Row(
                                             modifier = Modifier
@@ -1216,13 +1168,16 @@ fun ConversationScreen(
                                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
                                             for (imgUrl in rowImages) {
-                                                val originalIndex = galleryPics.indexOf(imgUrl)
+                                                val originalIndex = displayedPics.indexOf(imgUrl)
                                                 Box(
                                                     modifier = Modifier
                                                         .weight(1f)
                                                         .aspectRatio(1f)
                                                         .clip(RoundedCornerShape(8.dp))
-                                                        .clickable { fullScreenGalleryIndex = originalIndex },
+                                                        .clickable {
+                                                            recipientGalleryPics = displayedPics
+                                                            fullScreenGalleryIndex = originalIndex
+                                                        },
                                                     contentAlignment = Alignment.TopEnd
                                                 ) {
                                                     AsyncImage(
@@ -1239,13 +1194,16 @@ fun ConversationScreen(
                                         }
                                     }
                                 } else {
-                                    items(galleryPics) { imgUrl ->
-                                        val originalIndex = galleryPics.indexOf(imgUrl)
+                                    items(displayedPics) { imgUrl ->
+                                        val originalIndex = displayedPics.indexOf(imgUrl)
                                         Card(
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .padding(vertical = 6.dp)
-                                                .clickable { fullScreenGalleryIndex = originalIndex },
+                                                .clickable {
+                                                    recipientGalleryPics = displayedPics
+                                                    fullScreenGalleryIndex = originalIndex
+                                                },
                                             shape = RoundedCornerShape(12.dp),
                                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                                         ) {
@@ -1254,7 +1212,7 @@ fun ConversationScreen(
                                                     .fillMaxWidth()
                                                     .padding(8.dp),
                                                 verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                                horizontalArrangement = Arrangement.SpaceBetween
                                             ) {
                                                 AsyncImage(
                                                     model = imgUrl,
@@ -1271,7 +1229,7 @@ fun ConversationScreen(
                                                         fontSize = 14.sp
                                                     )
                                                     Text(
-                                                        text = "Tap to view full screen & download",
+                                                        text = "Tap to view full screen",
                                                         fontSize = 12.sp,
                                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                                     )
@@ -1402,9 +1360,9 @@ fun ConversationScreen(
                         Column {
                             val textColor = getThemeTopAppBarContentColor(themeColor)
                             Text(text = displayName, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = textColor)
-                            val statusText = if (conversation?.type == "group") "${conversation.participantIds.size} members" else formatLastSeen(uiState.recipientPresence, uiState.recipientLastSeen)
-                            val statusColor = if (uiState.recipientPresence.equals("online", true)) MaterialTheme.colorScheme.primary else textColor.copy(alpha = 0.7f)
-                            Text(text = statusText, fontSize = 12.sp, color = statusColor)
+                            if (conversation?.type == "group") {
+                                Text(text = "${conversation.participantIds.size} members", fontSize = 12.sp, color = textColor.copy(alpha = 0.7f))
+                            }
                         }
                     }
                 },
@@ -1581,7 +1539,7 @@ fun ConversationScreen(
                                 .clip(CircleShape),
                             colors = IconButtonDefaults.iconButtonColors(containerColor = MaterialTheme.colorScheme.primary)
                         ) {
-                            Icon(Icons.Default.Send, contentDescription = "Send", tint = MaterialTheme.colorScheme.onPrimary)
+                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", tint = MaterialTheme.colorScheme.onPrimary)
                         }
                     }
                 }
@@ -2219,8 +2177,6 @@ fun SharedMediaFolderGallery(
 fun ChatInfoDialog(
     recipientName: String,
     recipientPhoto: String,
-    presence: String,
-    lastSeen: Long,
     messages: List<Message>,
     onDismiss: () -> Unit,
     onOpenNickname: () -> Unit,
@@ -2279,7 +2235,6 @@ fun ChatInfoDialog(
                             }
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(text = recipientName, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                            Text(text = formatLastSeen(presence, lastSeen), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
 
@@ -2342,523 +2297,4 @@ fun ChatInfoDialog(
     }
 }
 
-@Composable
-fun FullScreenImageItem(imgUrl: String) {
-    var scale by remember(imgUrl) { mutableStateOf(1f) }
-    var offset by remember(imgUrl) { mutableStateOf(Offset.Zero) }
 
-    val transformState = rememberTransformableState { zoomChange, offsetChange, _ ->
-        scale = (scale * zoomChange).coerceIn(1f, 5f)
-        offset += offsetChange
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .transformable(transformState),
-        contentAlignment = Alignment.Center
-    ) {
-        AsyncImage(
-            model = imgUrl,
-            contentDescription = "Fullscreen Image",
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer(
-                    scaleX = scale,
-                    scaleY = scale,
-                    translationX = offset.x,
-                    translationY = offset.y
-                ),
-            contentScale = ContentScale.Fit
-        )
-    }
-}
-
-@Composable
-fun MediaGroupGrid(urls: List<String>, onImageClick: (String) -> Unit, onMoreClick: () -> Unit) {
-    val displayUrls = urls.take(4)
-    val extraCount = urls.size - 4
-
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier
-            .width(260.dp)
-            .height(260.dp),
-        color = Color(0xFF1E222A)
-    ) {
-        if (displayUrls.size == 1) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clickable { onImageClick(displayUrls[0]) }
-            ) {
-                AsyncImage(
-                    model = displayUrls[0],
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-            }
-        } else if (displayUrls.size == 2) {
-            Row(modifier = Modifier.fillMaxSize()) {
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .clickable { onImageClick(displayUrls[0]) }
-                ) {
-                    AsyncImage(
-                        model = displayUrls[0],
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                }
-                Spacer(modifier = Modifier.width(2.dp))
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .clickable { onImageClick(displayUrls[1]) }
-                ) {
-                    AsyncImage(
-                        model = displayUrls[1],
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                }
-            }
-        } else {
-            // 3 or 4 items (2x2 grid)
-            Column(modifier = Modifier.fillMaxSize()) {
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .clickable { onImageClick(displayUrls[0]) }
-                    ) {
-                        AsyncImage(
-                            model = displayUrls[0],
-                            contentDescription = null,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(2.dp))
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .clickable { onImageClick(displayUrls[1]) }
-                    ) {
-                        AsyncImage(
-                            model = displayUrls[1],
-                            contentDescription = null,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(2.dp))
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .clickable { onImageClick(displayUrls[2]) }
-                    ) {
-                        AsyncImage(
-                            model = displayUrls[2],
-                            contentDescription = null,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(2.dp))
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .clickable {
-                                if (extraCount > 0) {
-                                    onMoreClick()
-                                } else {
-                                    onImageClick(displayUrls[3])
-                                }
-                            }
-                    ) {
-                        if (displayUrls.size > 3) {
-                            AsyncImage(
-                                model = displayUrls[3],
-                                contentDescription = null,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
-                        }
-                        if (extraCount > 0) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(Color.Black.copy(alpha = 0.6f))
-                                    .clickable { onMoreClick() },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "+$extraCount",
-                                    color = Color.White,
-                                    fontSize = 24.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun VoiceMessagePlayer(audioUrl: String) {
-    val context = LocalContext.current
-    var isPlaying by remember { mutableStateOf(false) }
-    var currentPosition by remember { mutableStateOf(0) }
-    var totalDuration by remember { mutableStateOf(0) }
-    val mediaPlayer = remember { MediaPlayer() }
-
-    DisposableEffect(audioUrl) {
-        try {
-            mediaPlayer.setDataSource(audioUrl)
-            mediaPlayer.prepareAsync()
-            mediaPlayer.setOnPreparedListener { mp ->
-                totalDuration = mp.duration
-            }
-            mediaPlayer.setOnCompletionListener {
-                isPlaying = false
-                currentPosition = 0
-                try { mediaPlayer.seekTo(0) } catch (_: Exception) {}
-            }
-        } catch (_: Exception) {}
-
-        onDispose {
-            try {
-                mediaPlayer.stop()
-                mediaPlayer.release()
-            } catch (_: Exception) {}
-        }
-    }
-
-    LaunchedEffect(isPlaying) {
-        while (isPlaying) {
-            try {
-                currentPosition = mediaPlayer.currentPosition
-            } catch (_: Exception) {}
-            kotlinx.coroutines.delay(200)
-        }
-    }
-
-    val displayTime = if (isPlaying || currentPosition > 0) {
-        formatMillis(currentPosition)
-    } else if (totalDuration > 0) {
-        formatMillis(totalDuration)
-    } else {
-        "0:05"
-    }
-
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier
-            .padding(4.dp)
-            .fillMaxWidth()
-    ) {
-        IconButton(
-            onClick = {
-                try {
-                    if (isPlaying) {
-                        mediaPlayer.pause()
-                        isPlaying = false
-                    } else {
-                        mediaPlayer.start()
-                        isPlaying = true
-                    }
-                } catch (e: Exception) {
-                    Toast.makeText(context, "Cannot play audio: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
-                }
-            },
-            modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape),
-            colors = IconButtonDefaults.iconButtonColors(containerColor = MaterialTheme.colorScheme.primary)
-        ) {
-            Icon(
-                imageVector = if (isPlaying) Icons.Default.Close else Icons.Default.PlayArrow,
-                contentDescription = "Play/Pause",
-                tint = MaterialTheme.colorScheme.onPrimary
-            )
-        }
-
-        // Soundwave bars filling the available width evenly
-        Row(
-            modifier = Modifier
-                .weight(1f)
-                .height(24.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            val barHeights = listOf(
-                10, 16, 22, 14, 26, 18, 12, 24, 20, 16, 28, 14, 22, 18, 26, 12, 20, 16, 24, 14, 18, 12
-            )
-            barHeights.forEachIndexed { index, height ->
-                val active = (currentPosition.toFloat() / (totalDuration.takeIf { it > 0 } ?: 1)) >= (index.toFloat() / barHeights.size)
-                Box(
-                    modifier = Modifier
-                        .width(2.5.dp)
-                        .height(height.dp)
-                        .clip(RoundedCornerShape(1.25.dp))
-                        .background(if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
-                )
-            }
-        }
-
-        Text(
-            text = displayTime,
-            fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurface,
-            fontWeight = FontWeight.SemiBold
-        )
-    }
-}
-
-fun formatMillis(millis: Int): String {
-    val seconds = (millis / 1000) % 60
-    val minutes = (millis / (1000 * 60)) % 60
-    return String.format(Locale.getDefault(), "%d:%02d", minutes, seconds)
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun AlbumGridDialog(
-    urls: List<String>,
-    onDismiss: () -> Unit,
-    onImageClick: (Int) -> Unit
-) {
-    var viewMode by remember { mutableStateOf("grid") } // "grid", "list", "slide"
-
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth(0.95f)
-                .wrapContentHeight()
-                .heightIn(min = 250.dp, max = 620.dp),
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.background,
-            tonalElevation = 6.dp
-        ) {
-            Scaffold(
-                topBar = {
-                    TopAppBar(
-                        title = { Text("Media Album (${urls.size})", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
-                        navigationIcon = {
-                            IconButton(onClick = onDismiss) {
-                                Icon(Icons.Default.Close, contentDescription = "Close")
-                            }
-                        },
-                        actions = {
-                            Row(
-                                modifier = Modifier.padding(end = 8.dp),
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Button(
-                                    onClick = { viewMode = "grid" },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (viewMode == "grid") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                        contentColor = if (viewMode == "grid") MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                                    ),
-                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                                    modifier = Modifier.height(28.dp)
-                                ) { Text("Grid", fontSize = 10.sp) }
-
-                                Button(
-                                    onClick = { viewMode = "list" },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (viewMode == "list") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                        contentColor = if (viewMode == "list") MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                                    ),
-                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                                    modifier = Modifier.height(28.dp)
-                                ) { Text("List", fontSize = 10.sp) }
-
-                                Button(
-                                    onClick = { viewMode = "slide" },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (viewMode == "slide") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                        contentColor = if (viewMode == "slide") MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                                    ),
-                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                                    modifier = Modifier.height(28.dp)
-                                ) { Text("Slide", fontSize = 10.sp) }
-                            }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
-                    )
-                }
-            ) { padding ->
-                when (viewMode) {
-                    "grid" -> {
-                        LazyColumn(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(padding)
-                                .padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            val rows = urls.chunked(3)
-                            items(rows.size) { rowIndex ->
-                                val rowItems = rows[rowIndex]
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    for ((colIndex, url) in rowItems.withIndex()) {
-                                        val absoluteIndex = rowIndex * 3 + colIndex
-                                        Box(
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .aspectRatio(1f)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(Color(0xFF1E222A))
-                                                .clickable { onImageClick(absoluteIndex) },
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            AsyncImage(
-                                                model = url,
-                                                contentDescription = null,
-                                                modifier = Modifier.fillMaxSize(),
-                                                contentScale = ContentScale.Crop
-                                            )
-                                        }
-                                    }
-                                    repeat(3 - rowItems.size) {
-                                        Spacer(modifier = Modifier.weight(1f))
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    "list" -> {
-                        LazyColumn(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(padding)
-                                .padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            items(urls.size) { idx ->
-                                val url = urls[idx]
-                                Card(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { onImageClick(idx) },
-                                    shape = RoundedCornerShape(12.dp),
-                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(60.dp)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(Color(0xFF1E222A)),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            AsyncImage(
-                                                model = url,
-                                                contentDescription = null,
-                                                modifier = Modifier.fillMaxSize(),
-                                                contentScale = ContentScale.Crop
-                                            )
-                                        }
-                                        Column {
-                                            Text(
-                                                text = "📷 Photo #${idx + 1}",
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 14.sp
-                                            )
-                                            Text(
-                                                text = "Tap to view full screen",
-                                                fontSize = 11.sp,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    "slide" -> {
-                        val pagerState = rememberPagerState { urls.size }
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(padding)
-                                .background(Color.Black),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            HorizontalPager(
-                                state = pagerState,
-                                modifier = Modifier.fillMaxSize()
-                            ) { pageIndex ->
-                                val url = urls[pageIndex]
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .clickable { onImageClick(pageIndex) },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    AsyncImage(
-                                        model = url,
-                                        contentDescription = null,
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Fit
-                                    )
-                                }
-                            }
-
-                            Surface(
-                                shape = RoundedCornerShape(16.dp),
-                                color = Color.Black.copy(alpha = 0.6f),
-                                modifier = Modifier
-                                    .align(Alignment.BottomCenter)
-                                    .padding(16.dp)
-                            ) {
-                                Text(
-                                    text = "${pagerState.currentPage + 1} / ${urls.size}",
-                                    color = Color.White,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}

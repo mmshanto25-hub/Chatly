@@ -63,6 +63,7 @@ dependencies {
     implementation(libs.navigation.compose)
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.lifecycle.runtime.compose)
+    implementation("androidx.lifecycle:lifecycle-process:2.8.7")
     debugImplementation(libs.compose.ui.tooling)
 
     // Coroutines
