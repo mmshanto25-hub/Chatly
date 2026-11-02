@@ -141,6 +141,14 @@ class UserSearchViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 val channelName = "test_${currentUserId}_${recipient.uid}"
+
+                try {
+                    val oldCalls = firestore.collection("calls").whereEqualTo("channelName", channelName).get().await()
+                    for (oldDoc in oldCalls.documents) {
+                        oldDoc.reference.delete().await()
+                    }
+                } catch (_: Exception) {}
+
                 val callRef = firestore.collection("calls").document()
                 val callId = callRef.id
 
