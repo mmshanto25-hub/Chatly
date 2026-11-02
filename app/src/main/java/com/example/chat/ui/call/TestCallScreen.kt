@@ -2,6 +2,7 @@ package com.example.chat.ui.call
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.util.Log
 import android.view.SurfaceView
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -14,7 +15,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
-import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
@@ -38,15 +38,16 @@ import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import io.agora.rtc2.ChannelMediaOptions
+import io.agora.rtc2.Constants
 import io.agora.rtc2.IRtcEngineEventHandler
 import io.agora.rtc2.RtcEngine
 import io.agora.rtc2.RtcEngineConfig
 import io.agora.rtc2.video.VideoCanvas
-import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.delay
 import java.util.Locale
 
 const val AGORA_APP_ID = "babf1a2037454642a16ea4570feb3f75"
-const val AGORA_TOKEN = "007eJxTYNj3VF190r6K7TEFipMaKu8XLLxnWCgjutJqpcGCk9MXLtylwJCUmJRmmGhkYGxuYmpiZmKUaGiWmmhiam6QlppknGZuWhP9PKshkJFhxmZRBkYoBPFZGEpSi0sYGACApiAo"
 const val AGORA_CHANNEL = "test"
 
 @Composable
@@ -66,28 +67,48 @@ fun TestCallScreen(
 
     var otherPersonName by remember { mutableStateOf("User") }
     var otherPersonPhoto by remember { mutableStateOf("") }
+    var callStatus by remember { mutableStateOf("calling") }
 
-    // Fetch other user's name and photo from Firestore call document
-    LaunchedEffect(channelName) {
-        try {
-            val firestore = FirebaseFirestore.getInstance()
-            val snapshot = firestore.collection("calls")
-                .whereEqualTo("channelName", channelName)
-                .get()
-                .await()
-            val doc = snapshot.documents.firstOrNull()
-            if (doc != null) {
-                val callerId = doc.getString("callerId") ?: ""
-                val currentUid = FirebaseAuth.getInstance().currentUser?.uid ?: ""
-                if (callerId == currentUid) {
-                    otherPersonName = doc.getString("receiverName") ?: "User"
-                    otherPersonPhoto = doc.getString("receiverPhoto") ?: ""
-                } else {
-                    otherPersonName = doc.getString("callerName") ?: "User"
-                    otherPersonPhoto = doc.getString("callerPhoto") ?: ""
+    // Real-time listener for call status and participant info from Firestore
+    DisposableEffect(channelName) {
+        val firestore = FirebaseFirestore.getInstance()
+        val listener = firestore.collection("calls")
+            .whereEqualTo("channelName", channelName)
+            .addSnapshotListener { snapshot, error ->
+                if ((error != null) || (snapshot == null) || snapshot.isEmpty) return@addSnapshotListener
+
+                // Sort by timestamp descending in memory to get the latest call document
+                val sortedDocs = snapshot.documents.sortedByDescending { it.getLong("timestamp") ?: 0L }
+                val doc = sortedDocs.firstOrNull()
+
+                if (doc != null) {
+                    val status = doc.getString("status") ?: "calling"
+                    callStatus = status
+
+                    if (status.equals("ended", ignoreCase = true) ||
+                        status.equals("rejected", ignoreCase = true) ||
+                        status.equals("declined", ignoreCase = true)) {
+                        try {
+                            rtcEngine?.leaveChannel()
+                        } catch (_: Exception) {}
+                        onNavBack()
+                        return@addSnapshotListener
+                    }
+
+                    val callerId = doc.getString("callerId") ?: ""
+                    val currentUid = FirebaseAuth.getInstance().currentUser?.uid ?: ""
+                    if (callerId == currentUid) {
+                        otherPersonName = doc.getString("receiverName") ?: "User"
+                        otherPersonPhoto = doc.getString("receiverPhoto") ?: ""
+                    } else {
+                        otherPersonName = doc.getString("callerName") ?: "User"
+                        otherPersonPhoto = doc.getString("callerPhoto") ?: ""
+                    }
                 }
             }
-        } catch (_: Exception) {}
+        onDispose {
+            listener.remove()
+        }
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -115,35 +136,61 @@ fun TestCallScreen(
                 mEventHandler = object : IRtcEngineEventHandler() {
                     override fun onUserJoined(uid: Int, elapsed: Int) {
                         remoteUid = uid
+                        Log.d("AgoraCall", "User joined remoteUid: $uid")
                     }
 
                     override fun onUserOffline(uid: Int, reason: Int) {
                         if (remoteUid == uid) {
                             remoteUid = null
                         }
+                        Log.d("AgoraCall", "User offline: $uid")
                     }
 
                     override fun onJoinChannelSuccess(channel: String?, uid: Int, elapsed: Int) {
                         isJoined = true
+                        Log.d("AgoraCall", "Joined channel successfully: $channel with uid $uid")
+                    }
+
+                    override fun onError(err: Int) {
+                        super.onError(err)
+                        Log.e("AgoraCall", "Agora error code: $err")
+                    }
+
+                    override fun onConnectionStateChanged(state: Int, reason: Int) {
+                        super.onConnectionStateChanged(state, reason)
+                        Log.d("AgoraCall", "Connection state changed: state=$state, reason=$reason")
                     }
                 }
             }
             val engine = RtcEngine.create(config)
+            engine.enableAudio()
+            engine.enableVideo()
+            engine.setEnableSpeakerphone(true)
+
             if (isAudioCall) {
                 engine.disableVideo()
                 engine.muteLocalVideoStream(true)
                 isVideoDisabled = true
             } else {
-                engine.enableVideo()
                 engine.startPreview()
                 isVideoDisabled = false
             }
             rtcEngine = engine
 
-            // Auto-join channel immediately without requiring manual button tap
+            // Auto-join channel immediately with ChannelMediaOptions for Agora 4.x
             try {
-                engine.joinChannel(AGORA_TOKEN, channelName, "", 0)
-            } catch (_: Exception) {}
+                val options = ChannelMediaOptions().apply {
+                    clientRoleType = Constants.CLIENT_ROLE_BROADCASTER
+                    autoSubscribeAudio = true
+                    autoSubscribeVideo = true
+                    publishMicrophoneTrack = true
+                    publishCameraTrack = !isAudioCall
+                }
+                val result = engine.joinChannel("", channelName, 0, options)
+                Log.d("AgoraCall", "joinChannel result: $result for channel $channelName")
+            } catch (e: Exception) {
+                Log.e("AgoraCall", "Error joining channel: ${e.message}")
+            }
         } catch (e: Exception) {
             Toast.makeText(context, "Failed to initialize Agora Engine: ${e.message}", Toast.LENGTH_LONG).show()
         }
@@ -160,6 +207,18 @@ fun TestCallScreen(
     }
 
     fun leaveCall() {
+        try {
+            val firestore = FirebaseFirestore.getInstance()
+            firestore.collection("calls")
+                .whereEqualTo("channelName", channelName)
+                .get()
+                .addOnSuccessListener { snapshot ->
+                    for (doc in snapshot.documents) {
+                        doc.reference.update("status", "ended")
+                    }
+                }
+        } catch (_: Exception) {}
+
         val engine = rtcEngine ?: return
         try {
             engine.leaveChannel()
@@ -171,43 +230,53 @@ fun TestCallScreen(
         }
     }
 
-    if (isAudioCall) {
-        AudioCallScreen(
-            otherPersonName = otherPersonName,
-            otherPersonPhoto = otherPersonPhoto,
-            isJoined = isJoined,
-            remoteUid = remoteUid,
-            isMuted = isMuted,
-            onToggleMute = {
-                isMuted = !isMuted
-                rtcEngine?.muteLocalAudioStream(isMuted)
-            },
-            onEndCall = { leaveCall() },
-            onNavBack = { leaveCall() }
-        )
-    } else {
-        VideoCallScreen(
-            otherPersonName = otherPersonName,
-            otherPersonPhoto = otherPersonPhoto,
-            isJoined = isJoined,
-            remoteUid = remoteUid,
-            isMuted = isMuted,
-            isVideoDisabled = isVideoDisabled,
-            rtcEngine = rtcEngine,
-            onToggleMute = {
-                isMuted = !isMuted
-                rtcEngine?.muteLocalAudioStream(isMuted)
-            },
-            onToggleVideo = {
-                isVideoDisabled = !isVideoDisabled
-                rtcEngine?.muteLocalVideoStream(isVideoDisabled)
-            },
-            onSwitchCamera = {
-                rtcEngine?.switchCamera()
-            },
-            onEndCall = { leaveCall() },
-            onNavBack = { leaveCall() }
-        )
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = Color.Black
+    ) {
+        if (isAudioCall) {
+            AudioCallScreen(
+                otherPersonName = otherPersonName,
+                otherPersonPhoto = otherPersonPhoto,
+                callStatus = callStatus,
+                isMuted = isMuted,
+                onToggleMute = {
+                    isMuted = !isMuted
+                    rtcEngine?.muteLocalAudioStream(isMuted)
+                },
+                onEndCall = { leaveCall() },
+                onNavBack = { leaveCall() }
+            )
+        } else {
+            VideoCallScreen(
+                otherPersonName = otherPersonName,
+                otherPersonPhoto = otherPersonPhoto,
+                callStatus = callStatus,
+                remoteUid = remoteUid,
+                isMuted = isMuted,
+                isVideoDisabled = isVideoDisabled,
+                rtcEngine = rtcEngine,
+                onToggleMute = {
+                    isMuted = !isMuted
+                    rtcEngine?.muteLocalAudioStream(isMuted)
+                },
+                onToggleVideo = {
+                    isVideoDisabled = !isVideoDisabled
+                    rtcEngine?.muteLocalVideoStream(isVideoDisabled)
+                    try {
+                        val options = ChannelMediaOptions().apply {
+                            publishCameraTrack = !isVideoDisabled
+                        }
+                        rtcEngine?.updateChannelMediaOptions(options)
+                    } catch (_: Exception) {}
+                },
+                onSwitchCamera = {
+                    rtcEngine?.switchCamera()
+                },
+                onEndCall = { leaveCall() },
+                onNavBack = { leaveCall() }
+            )
+        }
     }
 }
 
@@ -215,7 +284,7 @@ fun TestCallScreen(
 fun VideoCallScreen(
     otherPersonName: String,
     otherPersonPhoto: String,
-    isJoined: Boolean,
+    callStatus: String,
     remoteUid: Int?,
     isMuted: Boolean,
     isVideoDisabled: Boolean,
@@ -226,6 +295,23 @@ fun VideoCallScreen(
     onEndCall: () -> Unit,
     onNavBack: () -> Unit
 ) {
+    val isAccepted = callStatus.equals("accepted", ignoreCase = true)
+    var secondsElapsed by remember { mutableStateOf(0) }
+
+    LaunchedEffect(isAccepted) {
+        if (isAccepted) {
+            secondsElapsed = 0
+            while (true) {
+                delay(1000)
+                secondsElapsed++
+            }
+        }
+    }
+
+    val minutes = secondsElapsed / 60
+    val seconds = secondsElapsed % 60
+    val timeFormatted = String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds)
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -284,7 +370,7 @@ fun VideoCallScreen(
                     }
                     Spacer(modifier = Modifier.height(24.dp))
                     Text(
-                        text = if (isJoined) "Waiting for $otherPersonName..." else "Connecting...",
+                        text = if (isAccepted) timeFormatted else "Ringing...",
                         color = Color.White,
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Medium
@@ -329,6 +415,11 @@ fun VideoCallScreen(
                             color = Color.White,
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp
+                        )
+                        Text(
+                            text = if (isAccepted) timeFormatted else "Ringing...",
+                            color = Color(0xFF9CA3AF),
+                            fontSize = 11.sp
                         )
                     }
                 }
@@ -438,8 +529,7 @@ fun VideoCallScreen(
 fun AudioCallScreen(
     otherPersonName: String,
     otherPersonPhoto: String,
-    isJoined: Boolean,
-    remoteUid: Int?,
+    callStatus: String,
     isMuted: Boolean,
     onToggleMute: () -> Unit,
     onEndCall: () -> Unit,
@@ -447,6 +537,23 @@ fun AudioCallScreen(
 ) {
     var isSpeakerOn by remember { mutableStateOf(true) }
     val context = LocalContext.current
+
+    val isAccepted = callStatus.equals("accepted", ignoreCase = true)
+    var secondsElapsed by remember { mutableStateOf(0) }
+
+    LaunchedEffect(isAccepted) {
+        if (isAccepted) {
+            secondsElapsed = 0
+            while (true) {
+                delay(1000)
+                secondsElapsed++
+            }
+        }
+    }
+
+    val minutes = secondsElapsed / 60
+    val seconds = secondsElapsed % 60
+    val timeFormatted = String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds)
 
     Box(
         modifier = Modifier
@@ -485,7 +592,7 @@ fun AudioCallScreen(
         ) {
             Box(
                 contentAlignment = Alignment.Center,
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp)
+                modifier = Modifier.padding(horizontal = 58.dp, vertical = 10.dp)
             ) {
                 Text(
                     text = otherPersonName,
@@ -531,9 +638,7 @@ fun AudioCallScreen(
             Spacer(modifier = Modifier.height(24.dp))
 
             Text(
-                text = if (isJoined && remoteUid != null) "Connected"
-                       else if (isJoined) "Ringing..."
-                       else "Connecting...",
+                text = if (isAccepted) timeFormatted else "Ringing...",
                 fontSize = 16.sp,
                 color = Color(0xFF9CA3AF),
                 fontWeight = FontWeight.Medium

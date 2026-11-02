@@ -169,9 +169,16 @@ fun ChatNavGraph() {
                         val channelName = "test_${myId}_${recipientId}"
 
                         val firestore = FirebaseFirestore.getInstance()
-                        val callRef = firestore.collection("calls").document()
 
                         CoroutineScope(Dispatchers.IO).launch {
+                            try {
+                                val oldCalls = firestore.collection("calls").whereEqualTo("channelName", channelName).get().await()
+                                for (oldDoc in oldCalls.documents) {
+                                    oldDoc.reference.delete().await()
+                                }
+                            } catch (_: Exception) {}
+
+                            val callRef = firestore.collection("calls").document()
                             val recipientDoc = try {
                                 firestore.collection("users").document(recipientId).get().await()
                             } catch (_: Exception) {
@@ -220,7 +227,13 @@ fun ChatNavGraph() {
                 com.example.chat.ui.call.TestCallScreen(
                     channelName = channelName,
                     callType = callType,
-                    onNavBack = { navController.popBackStack() }
+                    onNavBack = {
+                        if (!navController.popBackStack("chats", inclusive = false)) {
+                            navController.navigate("chats") {
+                                popUpTo(0) { inclusive = true }
+                            }
+                        }
+                    }
                 )
             }
             composable("profile") {
