@@ -77,7 +77,7 @@ fun ConversationScreen(
     recipientName: String,
     onNavBack: () -> Unit,
     onNavToChat: ((conversationId: String, recipientId: String, recipientName: String) -> Unit)? = null,
-    onNavToCall: (() -> Unit)? = null
+    onNavToCall: ((callType: String) -> Unit)? = null
 ) {
     val activeConversationId = viewModel.conversationId
     DisposableEffect(activeConversationId) {
@@ -1375,12 +1375,12 @@ fun ConversationScreen(
                 },
                 actions = {
                     IconButton(onClick = {
-                        onNavToCall?.invoke()
+                        onNavToCall?.invoke("video")
                     }) {
                         Icon(Icons.Default.Videocam, contentDescription = "Video Call", tint = getThemeTopAppBarContentColor(themeColor))
                     }
                     IconButton(onClick = {
-                        onNavToCall?.invoke()
+                        onNavToCall?.invoke("audio")
                     }) {
                         Icon(Icons.Default.Call, contentDescription = "Call", tint = getThemeTopAppBarContentColor(themeColor))
                     }

@@ -9,7 +9,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,7 +30,8 @@ import java.util.Locale
 fun UserSearchScreen(
     viewModel: UserSearchViewModel,
     onNavBack: () -> Unit,
-    onNavToChat: (conversationId: String, recipientId: String, recipientName: String) -> Unit
+    onNavToChat: (conversationId: String, recipientId: String, recipientName: String) -> Unit,
+    onNavToCall: (channelName: String, callType: String) -> Unit = { _, _ -> }
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
@@ -95,9 +98,19 @@ fun UserSearchScreen(
                     ) { user ->
                         UserItem(
                             user = user,
-                            onClick = {
+                            onMessageClick = {
                                 viewModel.startConversation(user) { conversationId ->
                                     onNavToChat(conversationId, user.uid, user.displayName)
+                                }
+                            },
+                            onAudioCallClick = {
+                                viewModel.initiateCall(user, callType = "audio") { channelName ->
+                                    onNavToCall(channelName, "audio")
+                                }
+                            },
+                            onVideoCallClick = {
+                                viewModel.initiateCall(user, callType = "video") { channelName ->
+                                    onNavToCall(channelName, "video")
                                 }
                             }
                         )
@@ -112,12 +125,14 @@ fun UserSearchScreen(
 @Composable
 fun UserItem(
     user: User,
-    onClick: () -> Unit
+    onMessageClick: () -> Unit,
+    onAudioCallClick: () -> Unit,
+    onVideoCallClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable(onClick = onMessageClick)
             .padding(vertical = 12.dp, horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -146,29 +161,48 @@ fun UserItem(
             }
         }
 
-        Spacer(modifier = Modifier.width(16.dp))
+        Spacer(modifier = Modifier.width(12.dp))
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = user.displayName,
                 fontWeight = FontWeight.Bold,
-                fontSize = 16.sp,
+                fontSize = 15.sp,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = if (user.username.isNotBlank()) "@${user.username}" else user.email,
-                fontSize = 13.sp,
+                fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
-        IconButton(onClick = onClick) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.Chat,
-                contentDescription = "Message",
-                tint = MaterialTheme.colorScheme.primary
-            )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy((-4).dp)
+        ) {
+            IconButton(onClick = onAudioCallClick) {
+                Icon(
+                    imageVector = Icons.Default.Call,
+                    contentDescription = "Audio Call",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+            IconButton(onClick = onVideoCallClick) {
+                Icon(
+                    imageVector = Icons.Default.Videocam,
+                    contentDescription = "Video Call",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+            IconButton(onClick = onMessageClick) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.Chat,
+                    contentDescription = "Message",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
         }
     }
 }
