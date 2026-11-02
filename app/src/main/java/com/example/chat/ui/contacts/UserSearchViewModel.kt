@@ -136,4 +136,49 @@ class UserSearchViewModel : ViewModel() {
             }
         }
     }
+
+    fun initiateCall(recipient: User, callType: String = "audio", onCallReady: (channelName: String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val channelName = "test_${currentUserId}_${recipient.uid}"
+                val callRef = firestore.collection("calls").document()
+                val callId = callRef.id
+
+                val currentUserDoc = try {
+                    firestore.collection("users").document(currentUserId).get().await()
+                } catch (_: Exception) {
+                    null
+                }
+                val myName = currentUserDoc?.getString("displayName") ?: "User"
+                val myPhoto = currentUserDoc?.getString("photoUrl") ?: ""
+
+                val recipientDoc = try {
+                    firestore.collection("users").document(recipient.uid).get().await()
+                } catch (_: Exception) {
+                    null
+                }
+                val recipientName = recipientDoc?.getString("displayName") ?: recipient.displayName
+                val recipientPhoto = recipientDoc?.getString("photoUrl") ?: recipient.photoUrl
+
+                val callData = mapOf(
+                    "callId" to callId,
+                    "channelName" to channelName,
+                    "callerId" to currentUserId,
+                    "callerName" to myName,
+                    "callerPhoto" to myPhoto,
+                    "receiverId" to recipient.uid,
+                    "receiverName" to recipientName,
+                    "receiverPhoto" to recipientPhoto,
+                    "callType" to callType,
+                    "status" to "calling",
+                    "timestamp" to System.currentTimeMillis()
+                )
+
+                callRef.set(callData).await()
+                onCallReady(channelName)
+            } catch (e: Exception) {
+                _uiState.update { it.copy(errorMessage = "Failed to initiate call: ${e.localizedMessage}") }
+            }
+        }
+    }
 }
