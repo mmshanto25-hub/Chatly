@@ -65,13 +65,10 @@ class AuthRepository {
                 email = email,
                 username = username,
                 createdAt = System.currentTimeMillis(),
-                lastSeenAt = System.currentTimeMillis(),
-                lastSeen = System.currentTimeMillis(),
-                presence = "online",
-                isOnline = true
+                isOnline = true,
+                lastSeenAt = null
             )
             db.collection("users").document(uid).set(user).await()
-            com.example.chat.core.utils.PresenceManager.setUserOnline()
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -80,15 +77,12 @@ class AuthRepository {
 
     suspend fun logout() {
         try {
-            com.example.chat.core.utils.PresenceManager.setUserOffline()
             val uid = currentUserId
             if ((uid != null) && (firestore != null)) {
                 firestore.collection("users").document(uid).update(
                     mapOf(
-                        "presence" to "offline",
                         "isOnline" to false,
-                        "lastSeenAt" to System.currentTimeMillis(),
-                        "lastSeen" to System.currentTimeMillis()
+                        "lastSeenAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
                     ),
                 ).await()
             }
@@ -119,8 +113,8 @@ class AuthRepository {
                     email = email,
                     username = username,
                     createdAt = System.currentTimeMillis(),
-                    lastSeenAt = System.currentTimeMillis(),
-                    presence = "online"
+                    isOnline = true,
+                    lastSeenAt = null
                 )
                 db.collection("users").document(uid).set(newUser).await()
                 newUser
@@ -128,19 +122,6 @@ class AuthRepository {
         } catch (_: Exception) {
             null
         }
-    }
-
-    private suspend fun updateUserPresence(status: String) {
-        val uid = currentUserId ?: return
-        val db = firestore ?: return
-        try {
-            db.collection("users").document(uid).update(
-                mapOf(
-                    "presence" to status,
-                    "lastSeenAt" to System.currentTimeMillis(),
-                ),
-            ).await()
-        } catch (_: Exception) {}
     }
 
     suspend fun deleteAccount(): Result<Unit> {

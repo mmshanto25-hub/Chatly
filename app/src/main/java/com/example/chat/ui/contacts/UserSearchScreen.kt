@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.chat.data.model.User
+import com.google.firebase.Timestamp
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -254,11 +255,21 @@ fun UserSearchScreen(
     }
 }
 
-fun formatLastSeen(timestamp: Long): String {
-    if (timestamp <= 0L) return "recently"
+fun formatLastSeen(timestamp: Any?): String {
+    val date = when (timestamp) {
+        is Timestamp -> timestamp.toDate()
+        is java.util.Date -> timestamp
+        is Number -> java.util.Date(timestamp.toLong())
+        else -> null
+    }
+    if (date == null) return "Last seen recently"
+
+    val timeMs = date.time
     val now = System.currentTimeMillis()
-    val diff = now - timestamp
-    if (diff < 0L) return "just now"
+    if (timeMs > now + 60_000L) return "Last seen recently"
+
+    val diff = now - timeMs
+    if (diff < 0L) return "Last seen just now"
 
     val seconds = diff / 1000
     val minutes = seconds / 60
@@ -266,14 +277,14 @@ fun formatLastSeen(timestamp: Long): String {
     val days = hours / 24
 
     return when {
-        minutes < 1 -> "just now"
-        minutes < 60 -> "${minutes}m ago"
-        hours < 24 -> "${hours}h ago"
-        days == 1L -> "Yesterday"
-        days < 7 -> "${days}d ago"
+        minutes < 1 -> "Last seen just now"
+        minutes < 60 -> "Last seen ${minutes}m ago"
+        hours < 24 -> "Last seen ${hours}h ago"
+        days == 1L -> "Last seen Yesterday"
+        days < 7 -> "Last seen ${days}d ago"
         else -> {
             val sdf = java.text.SimpleDateFormat("MMM d", Locale.getDefault())
-            sdf.format(java.util.Date(timestamp))
+            "Last seen ${sdf.format(date)}"
         }
     }
 }
@@ -330,7 +341,7 @@ fun CallLogItem(
                     imageVector = if (callLog.isOutgoing) Icons.AutoMirrored.Filled.CallMade else Icons.AutoMirrored.Filled.CallReceived,
                     contentDescription = null,
                     modifier = Modifier.size(14.dp),
-                    tint = if (callLog.status == "rejected" || callLog.status == "declined") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                    tint = if ((callLog.status == "rejected") || (callLog.status == "declined")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
@@ -358,8 +369,14 @@ fun UserItem(
     onAudioCallClick: () -> Unit,
     onVideoCallClick: () -> Unit
 ) {
-    val isOnline = user.isOnline || user.presence.equals("online", ignoreCase = true)
-    val lastSeenTimestamp = if (user.lastSeen > 0L) user.lastSeen else user.lastSeenAt
+    val timeMs = when (user.lastSeenAt) {
+        is Timestamp -> user.lastSeenAt.toDate().time
+        is java.util.Date -> user.lastSeenAt.time
+        is Number -> user.lastSeenAt.toLong()
+        else -> 0L
+    }
+    val isRecentlyActive = timeMs > 0L && (System.currentTimeMillis() - timeMs < 90_000L)
+    val isOnline = user.isOnline || isRecentlyActive
 
     Row(
         modifier = Modifier
@@ -425,7 +442,7 @@ fun UserItem(
                 )
             } else {
                 Text(
-                    text = "Last seen ${formatLastSeen(lastSeenTimestamp)}",
+                    text = formatLastSeen(user.lastSeenAt),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

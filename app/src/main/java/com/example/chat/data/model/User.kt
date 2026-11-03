@@ -11,8 +11,6 @@ data class User(
     val coverPictures: List<String> = emptyList(),
     val profileVisitorsCount: Int = 0,
     val createdAt: Long = System.currentTimeMillis(),
-    val lastSeenAt: Long = System.currentTimeMillis(),
-    val presence: String = "offline",
     val isOnline: Boolean = false,
-    val lastSeen: Long = System.currentTimeMillis()
+    val lastSeenAt: Any? = null
 )
