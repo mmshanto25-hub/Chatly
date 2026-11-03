@@ -133,9 +133,7 @@ fun ChatNavGraph() {
                     viewModel = searchViewModel,
                     onNavBack = { navController.popBackStack() },
                     onNavToChat = { convId, recipientId, recipientName ->
-                        navController.navigate("conversation/$convId/$recipientId/$recipientName") {
-                            popUpTo("chats")
-                        }
+                        navController.navigate("conversation/$convId/$recipientId/$recipientName")
                     },
                     onNavToCall = { channelName, callType ->
                         navController.navigate("call/$channelName?callType=$callType")
@@ -160,9 +158,7 @@ fun ChatNavGraph() {
                     recipientName = recipientName,
                     onNavBack = { navController.popBackStack() },
                     onNavToChat = { convId, recId, name ->
-                        navController.navigate("conversation/$convId/$recId/$name") {
-                            popUpTo("chats")
-                        }
+                        navController.navigate("conversation/$convId/$recId/$name")
                     },
                     onNavToCall = { callType ->
                         val myId = conversationViewModel.currentUserId
@@ -170,48 +166,50 @@ fun ChatNavGraph() {
 
                         val firestore = FirebaseFirestore.getInstance()
 
-                        CoroutineScope(Dispatchers.IO).launch {
+                        CoroutineScope(Dispatchers.Main).launch {
                             try {
-                                val oldCalls = firestore.collection("calls").whereEqualTo("channelName", channelName).get().await()
-                                for (oldDoc in oldCalls.documents) {
-                                    oldDoc.reference.delete().await()
+                                kotlinx.coroutines.withContext(Dispatchers.IO) {
+                                    val oldCalls = firestore.collection("calls").whereEqualTo("channelName", channelName).get().await()
+                                    for (oldDoc in oldCalls.documents) {
+                                        oldDoc.reference.delete().await()
+                                    }
+
+                                    val callRef = firestore.collection("calls").document()
+                                    val recipientDoc = try {
+                                        firestore.collection("users").document(recipientId).get().await()
+                                    } catch (_: Exception) {
+                                        null
+                                    }
+                                    val recName = recipientDoc?.getString("displayName") ?: recipientName
+                                    val recPhoto = recipientDoc?.getString("photoUrl") ?: ""
+
+                                    val currentUserDoc = try {
+                                        firestore.collection("users").document(myId).get().await()
+                                    } catch (_: Exception) {
+                                        null
+                                    }
+                                    val myName = currentUserDoc?.getString("displayName") ?: "User"
+                                    val myPhoto = currentUserDoc?.getString("photoUrl") ?: ""
+
+                                    val callData = mapOf(
+                                        "callId" to callRef.id,
+                                        "channelName" to channelName,
+                                        "callerId" to myId,
+                                        "receiverId" to recipientId,
+                                        "receiverName" to recName,
+                                        "receiverPhoto" to recPhoto,
+                                        "callerName" to myName,
+                                        "callerPhoto" to myPhoto,
+                                        "callType" to callType,
+                                        "status" to "calling",
+                                        "timestamp" to System.currentTimeMillis()
+                                    )
+                                    callRef.set(callData).await()
                                 }
                             } catch (_: Exception) {}
 
-                            val callRef = firestore.collection("calls").document()
-                            val recipientDoc = try {
-                                firestore.collection("users").document(recipientId).get().await()
-                            } catch (_: Exception) {
-                                null
-                            }
-                            val recName = recipientDoc?.getString("displayName") ?: recipientName
-                            val recPhoto = recipientDoc?.getString("photoUrl") ?: ""
-
-                            val currentUserDoc = try {
-                                firestore.collection("users").document(myId).get().await()
-                            } catch (_: Exception) {
-                                null
-                            }
-                            val myName = currentUserDoc?.getString("displayName") ?: "User"
-                            val myPhoto = currentUserDoc?.getString("photoUrl") ?: ""
-
-                            val callData = mapOf(
-                                "callId" to callRef.id,
-                                "channelName" to channelName,
-                                "callerId" to myId,
-                                "receiverId" to recipientId,
-                                "receiverName" to recName,
-                                "receiverPhoto" to recPhoto,
-                                "callerName" to myName,
-                                "callerPhoto" to myPhoto,
-                                "callType" to callType,
-                                "status" to "calling",
-                                "timestamp" to System.currentTimeMillis()
-                            )
-                            callRef.set(callData).await()
+                            navController.navigate("call/$channelName?callType=$callType")
                         }
-
-                        navController.navigate("call/$channelName?callType=$callType")
                     }
                 )
             }
@@ -228,10 +226,8 @@ fun ChatNavGraph() {
                     channelName = channelName,
                     callType = callType,
                     onNavBack = {
-                        if (!navController.popBackStack("chats", inclusive = false)) {
-                            navController.navigate("chats") {
-                                popUpTo(0) { inclusive = true }
-                            }
+                        if (!navController.popBackStack()) {
+                            navController.navigate("chats")
                         }
                     }
                 )
