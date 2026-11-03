@@ -13,6 +13,8 @@ data class Conversation(
     val lastMessage: String = "",
     val lastMessageAt: Long = System.currentTimeMillis(),
     val lastMessageSenderId: String = "",
+    val lastMessageStatus: String = "sent",
+    val unreadCounts: Map<String, Int> = emptyMap(),
     val isPinned: Boolean = false,
     val isArchived: Boolean = false,
     val isMuted: Boolean = false,
@@ -26,6 +28,7 @@ data class Conversation(
     fun isPinnedFor(userId: String): Boolean = isPinned || pinnedBy.contains(userId)
     fun isArchivedFor(userId: String): Boolean = isArchived || archivedBy.contains(userId)
     fun isMutedFor(userId: String): Boolean = isMuted || mutedBy.contains(userId)
+    fun getUnreadCount(userId: String): Int = unreadCounts[userId] ?: 0
 
     fun getTitle(currentUserId: String): String {
         if (type == "group") {

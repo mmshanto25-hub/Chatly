@@ -346,6 +346,22 @@ class ChatRepository {
 
             val summary = if (messageType == "image") "📷 Photo" else if (messageType == "video") "🎥 Video" else if (messageType == "audio") "🎤 Voice message" else text
 
+            val currentUnreads = (convDoc["unreadCounts"] as? Map<*, *>)?.mapNotNull { (k, v) ->
+                val key = k as? String
+                val value = (v as? Number)?.toInt()
+                if (key != null && value != null) key to value else null
+            }?.toMap()?.toMutableMap() ?: mutableMapOf()
+
+            if (participants != null) {
+                for (p in participants) {
+                    val participantId = p as? String
+                    if (participantId != null && participantId != senderId) {
+                        val count = currentUnreads[participantId] ?: 0
+                        currentUnreads[participantId] = count + 1
+                    }
+                }
+            }
+
             db.collection("conversations")
                 .document(conversationId)
                 .update(
@@ -354,6 +370,8 @@ class ChatRepository {
                         "lastMessage" to summary,
                         "lastMessageAt" to System.currentTimeMillis(),
                         "lastMessageSenderId" to senderId,
+                        "lastMessageStatus" to "sent",
+                        "unreadCounts" to currentUnreads,
                         "updatedAt" to System.currentTimeMillis()
                     )
                 ).await()

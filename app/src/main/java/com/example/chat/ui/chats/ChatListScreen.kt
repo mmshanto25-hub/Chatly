@@ -1,8 +1,11 @@
 package com.example.chat.ui.chats
 
 import android.text.format.DateFormat
+import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
@@ -11,9 +14,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
@@ -26,22 +27,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.Color
-
 import androidx.compose.ui.text.font.FontWeight
-import com.chatly.app.R
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.chat.data.local.SavedAccount
 import com.example.chat.data.local.SavedAccountManager
 import com.example.chat.data.model.Conversation
-import com.example.chat.data.repository.AuthRepository
-import kotlinx.coroutines.launch
+import com.example.chat.data.model.User
+import com.google.firebase.Timestamp
 import java.util.Calendar
 import java.util.Locale
 
@@ -56,21 +54,27 @@ fun ChatListScreen(
     onNavToLogin: () -> Unit,
     onSwitchAccount: () -> Unit
 ) {
-    val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
     val uiState by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
     val currentUserId = viewModel.currentUserId
-    var showMenu by remember { mutableStateOf(false) }
-    var isSearching by remember { mutableStateOf(false) }
-    var showAccountSwitcher by remember { mutableStateOf(false) }
-    var showAddAccountDialog by remember { mutableStateOf(false) }
-    var showRegisterDialog by remember { mutableStateOf(false) }
 
+    var showMenu by remember { mutableStateOf(false) }
+    var selectedFilter by remember { mutableStateOf("All") }
+    var searchQuery by remember { mutableStateOf("") }
+    var isSearching by remember { mutableStateOf(false) }
     var selectedConversationForMenu by remember { mutableStateOf<Conversation?>(null) }
-    var accountToSwitch by remember { mutableStateOf<SavedAccount?>(null) }
-    var passwordInput by remember { mutableStateOf("") }
-    var switchError by remember { mutableStateOf<String?>(null) }
-    var isSwitching by remember { mutableStateOf(false) }
+    var showAccountBottomSheet by remember { mutableStateOf(false) }
+
+    var showAddAccountDialog by remember { mutableStateOf(false) }
+    var isRegisteringAccount by remember { mutableStateOf(false) }
+
+    var addEmailInput by remember { mutableStateOf("") }
+    var addPasswordInput by remember { mutableStateOf("") }
+
+    var regFullNameInput by remember { mutableStateOf("") }
+    var regEmailInput by remember { mutableStateOf("") }
+    var regPasswordInput by remember { mutableStateOf("") }
+    var regConfirmPasswordInput by remember { mutableStateOf("") }
 
     Scaffold(
         topBar = {
@@ -78,124 +82,115 @@ fun ChatListScreen(
                 title = {
                     if (isSearching) {
                         OutlinedTextField(
-                            value = uiState.searchQuery,
-                            onValueChange = { viewModel.setSearchQuery(it) },
+                            value = searchQuery,
+                            onValueChange = {
+                                searchQuery = it
+                                viewModel.setSearchQuery(it)
+                            },
                             placeholder = { Text("Search conversations...") },
                             singleLine = true,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(50.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                                unfocusedBorderColor = Color.Transparent,
+                                focusedBorderColor = Color.Transparent
                             )
                         )
                     } else {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            if (!uiState.showArchived) {
-                                Image(
-                                    painter = painterResource(id = R.drawable.chat_logo),
-                                    contentDescription = "Talky Logo",
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(CircleShape),
-                                    contentScale = ContentScale.Crop
-                                )
-                            }
-                            Text(
-                                if (uiState.showArchived) "Archived Chats" else "Talky",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 22.sp
-                            )
-                        }
-                    }
-                },
-                navigationIcon = {
-                    if (uiState.showArchived) {
-                        IconButton(onClick = { viewModel.toggleShowArchived() }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to Inbox")
-                        }
+                        Text(
+                            text = "Talky",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 22.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                     }
                 },
                 actions = {
-                    if (isSearching) {
-                        IconButton(onClick = {
-                            isSearching = false
+                    IconButton(onClick = {
+                        isSearching = !isSearching
+                        if (!isSearching) {
+                            searchQuery = ""
                             viewModel.setSearchQuery("")
-                        }) {
-                            Icon(Icons.Default.Close, contentDescription = "Close Search")
                         }
-                    } else {
-                        IconButton(onClick = { isSearching = true }) {
-                            Icon(Icons.Default.Search, contentDescription = "Search Chats")
-                        }
-                        val userPhoto = uiState.currentUser?.photoUrl ?: ""
-                        IconButton(onClick = onNavToProfile) {
-                            if (userPhoto.isNotBlank()) {
+                    }) {
+                        Icon(
+                            imageVector = if (isSearching) Icons.Default.Close else Icons.Default.Search,
+                            contentDescription = "Search"
+                        )
+                    }
+
+                    IconButton(onClick = onNavToProfile) {
+                        Surface(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape),
+                            color = MaterialTheme.colorScheme.primaryContainer
+                        ) {
+                            if (uiState.currentUser?.photoUrl?.isNotBlank() == true) {
                                 AsyncImage(
-                                    model = userPhoto,
+                                    model = uiState.currentUser?.photoUrl,
                                     contentDescription = "Profile",
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .clip(CircleShape),
+                                    modifier = Modifier.fillMaxSize(),
                                     contentScale = ContentScale.Crop
                                 )
                             } else {
-                                Icon(Icons.Default.Person, contentDescription = "Profile")
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Default.Person, contentDescription = "Profile", modifier = Modifier.size(18.dp))
+                                }
                             }
                         }
-                        IconButton(onClick = { showMenu = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "More Options")
-                        }
-                        DropdownMenu(
-                            expanded = showMenu,
-                            onDismissRequest = { showMenu = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text(if (uiState.showArchived) "Back to Inbox" else "Archived Chats") },
-                                onClick = {
-                                    showMenu = false
-                                    viewModel.toggleShowArchived()
+                    }
+
+                    IconButton(onClick = { showMenu = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Menu")
+                    }
+
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Settings") },
+                            onClick = {
+                                showMenu = false
+                                onNavToSettings()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Switch Account") },
+                            onClick = {
+                                showMenu = false
+                                showAccountBottomSheet = true
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(if (uiState.showArchived) "Hide Archived Chats" else "Archived Chats") },
+                            onClick = {
+                                showMenu = false
+                                viewModel.toggleShowArchived()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Logout") },
+                            onClick = {
+                                showMenu = false
+                                viewModel.logout {
+                                    onNavToLogin()
                                 }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Settings") },
-                                onClick = {
-                                    showMenu = false
-                                    onNavToSettings()
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Logout") },
-                                onClick = {
-                                    showMenu = false
-                                    viewModel.logout(onNavToLogin)
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Switch Account") },
-                                onClick = {
-                                    showMenu = false
-                                    showAccountSwitcher = true
-                                }
-                            )
-                        }
+                            }
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         },
         floatingActionButton = {
-            if (!uiState.showArchived) {
-                FloatingActionButton(
-                    onClick = onNavToSearch,
-                    containerColor = MaterialTheme.colorScheme.primary
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = "New Chat", tint = MaterialTheme.colorScheme.onPrimary)
-                }
+            FloatingActionButton(
+                onClick = onNavToSearch,
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "New Chat")
             }
         }
     ) { padding ->
@@ -204,580 +199,466 @@ fun ChatListScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            if (!uiState.showArchived) {
-                val filters = listOf("All", "Personal", "Groups")
-                LazyRow(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(filters) { filter ->
-                        FilterChip(
-                            selected = uiState.selectedFilter == filter,
-                            onClick = { viewModel.setFilter(filter) },
-                            label = { Text(filter) }
-                        )
-                    }
+            // Filters Row
+            val filters = listOf("All", "Personal", "Groups")
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(filters) { filter ->
+                    FilterChip(
+                        selected = selectedFilter == filter,
+                        onClick = {
+                            selectedFilter = filter
+                            viewModel.setFilter(filter)
+                        },
+                        label = { Text(filter) }
+                    )
                 }
             }
 
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-            ) {
-                if (uiState.isLoading) {
-                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-                } else if (uiState.filteredConversations.isEmpty()) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(32.dp),
-                        verticalArrangement = Arrangement.Center,
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
+            if (uiState.isLoading) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            } else if (uiState.filteredConversations.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
                             text = if (uiState.showArchived) "No Archived Chats" else "No Conversations Found",
-                            fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = if (uiState.showArchived) "Archived conversations will appear here." else "Tap the search button or plus icon below to start a conversation!",
+                            text = if (uiState.showArchived) "Archived conversations will appear here." else "Tap the search button or FAB to start chatting.",
                             fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 16.dp)
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                         )
-                        if (!uiState.showArchived) {
-                            Spacer(modifier = Modifier.height(24.dp))
-                            Button(onClick = onNavToSearch) {
-                                Icon(Icons.Default.Search, contentDescription = null)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Find Users")
-                            }
-                        }
                     }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        items(
-                            items = uiState.filteredConversations,
-                            key = { it.conversationId },
-                            contentType = { "conversation_item" }
-                        ) { conversation ->
-                            val recipientId = conversation.participantIds.firstOrNull { it != currentUserId } ?: ""
-                            val title = conversation.getTitle(currentUserId)
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(
+                        items = uiState.filteredConversations,
+                        key = { it.conversationId },
+                        contentType = { "conversation_item" }
+                    ) { conversation ->
+                        val recipientId = conversation.participantIds.firstOrNull { it != currentUserId } ?: ""
+                        val title = conversation.getTitle(currentUserId)
 
-                            ConversationItem(
-                                conversation = conversation,
-                                recipientId = recipientId,
-                                recipientName = title,
-                                currentUserId = currentUserId,
-                                onClick = {
-                                    onNavToChat(conversation.conversationId, recipientId, title)
-                                },
-                                onLongClick = {
-                                    selectedConversationForMenu = conversation
-                                }
-                            )
-                            HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant, thickness = 0.5.dp)
-                        }
+                        ConversationItem(
+                            conversation = conversation,
+                            recipientId = recipientId,
+                            recipientName = title,
+                            currentUserId = currentUserId,
+                            recipientUser = uiState.usersMap[recipientId],
+                            onClick = {
+                                onNavToChat(conversation.conversationId, recipientId, title)
+                            },
+                            onLongClick = {
+                                selectedConversationForMenu = conversation
+                            }
+                        )
+                        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant, thickness = 0.5.dp)
                     }
                 }
             }
         }
     }
 
-    // Long-press Action Menu Modal Bottom Sheet
     if (selectedConversationForMenu != null) {
         val conv = selectedConversationForMenu!!
         val isPinned = conv.isPinnedFor(currentUserId)
         val isArchived = conv.isArchivedFor(currentUserId)
         val isMuted = conv.isMutedFor(currentUserId)
 
-        ModalBottomSheet(
-            onDismissRequest = { selectedConversationForMenu = null }
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Text(
-                    text = "Conversation Options",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp,
-                    modifier = Modifier.padding(bottom = 12.dp)
-                )
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            viewModel.togglePin(conv.conversationId, isPinned)
-                            selectedConversationForMenu = null
-                        }
-                        .padding(vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Text("📌", fontSize = 20.sp)
-                    Text(if (isPinned) "Unpin Conversation" else "Pin Conversation", fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                }
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            viewModel.toggleArchive(conv.conversationId, isArchived)
-                            selectedConversationForMenu = null
-                        }
-                        .padding(vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Text("📂", fontSize = 20.sp)
-                    Text(if (isArchived) "Unarchive Conversation" else "Archive Conversation", fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                }
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            viewModel.toggleMute(conv.conversationId, isMuted)
-                            selectedConversationForMenu = null
-                        }
-                        .padding(vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Text(if (isMuted) "🔔" else "🔕", fontSize = 20.sp)
-                    Text(if (isMuted) "Unmute Notifications" else "Mute Notifications", fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                }
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            viewModel.deleteConversationForUser(conv.conversationId)
-                            selectedConversationForMenu = null
-                        }
-                        .padding(vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Text("🗑️", fontSize = 20.sp)
-                    Text("Delete Conversation", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.error)
-                }
-
-                Spacer(modifier = Modifier.height(36.dp))
-            }
-        }
-    }
-
-    // Account Switcher Modal Bottom Sheet
-    if (showAccountSwitcher) {
-        val savedAccounts = remember { SavedAccountManager.getSavedAccounts(context) }
-        ModalBottomSheet(
-            onDismissRequest = { showAccountSwitcher = false }
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text = "Switch Account",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 20.sp,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
-
-                if (savedAccounts.isEmpty()) {
-                    Text("No other saved accounts.", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                } else {
-                    LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(savedAccounts) { account ->
-                            val isCurrent = (account.email.equals(uiState.currentUser?.email, ignoreCase = true))
-                            Card(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        showAccountSwitcher = false
-                                        if (account.password.isNotBlank()) {
-                                            viewModel.switchAccount(context, account.email, account.password, {
-                                                onSwitchAccount()
-                                            }, { err ->
-                                                switchError = err
-                                            })
-                                        } else {
-                                            accountToSwitch = account
-                                            passwordInput = ""
-                                            switchError = null
-                                        }
-                                    },
-                                colors = CardDefaults.cardColors(
-                                    containerColor = if (isCurrent) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
-                                ),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        Surface(
-                                            modifier = Modifier
-                                                .size(44.dp)
-                                                .clip(CircleShape),
-                                            color = MaterialTheme.colorScheme.primaryContainer
-                                        ) {
-                                            if (account.photoUrl.isNotBlank()) {
-                                                AsyncImage(
-                                                    model = account.photoUrl,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.fillMaxSize(),
-                                                    contentScale = ContentScale.Crop
-                                                )
-                                            } else {
-                                                Box(contentAlignment = Alignment.Center) {
-                                                    Text(
-                                                        text = account.displayName.take(1).uppercase(),
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                                                    )
-                                                }
-                                            }
-                                        }
-                                        Column {
-                                            Text(
-                                                text = account.displayName,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 16.sp
-                                            )
-                                            Text(
-                                                text = account.email,
-                                                fontSize = 13.sp,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-                                    if (isCurrent) {
-                                        Badge { Text("Active") }
-                                    }
-                                }
-                            }
-                        }
+        AlertDialog(
+            onDismissRequest = { selectedConversationForMenu = null },
+            title = { Text("Conversation Options") },
+            text = {
+                Column {
+                    TextButton(onClick = {
+                        viewModel.togglePin(conv.conversationId, isPinned)
+                        selectedConversationForMenu = null
+                    }, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (isPinned) "Unpin Conversation" else "Pin Conversation", fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    }
+                    TextButton(onClick = {
+                        viewModel.toggleArchive(conv.conversationId, isArchived)
+                        selectedConversationForMenu = null
+                    }, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (isArchived) "Unarchive Conversation" else "Archive Conversation", fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    }
+                    TextButton(onClick = {
+                        viewModel.toggleMute(conv.conversationId, isMuted)
+                        selectedConversationForMenu = null
+                    }, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (isMuted) "Unmute Notifications" else "Mute Notifications", fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    }
+                    TextButton(onClick = {
+                        viewModel.deleteConversationForUser(conv.conversationId)
+                        selectedConversationForMenu = null
+                    }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Delete Conversation", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.error)
                     }
                 }
+            },
+            confirmButton = {
+                TextButton(onClick = { selectedConversationForMenu = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 
-                // Add New Account button
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            showAccountSwitcher = false
-                            showAddAccountDialog = true
-                        },
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Surface(
-                            modifier = Modifier.size(44.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text("➕", fontSize = 20.sp)
-                            }
-                        }
+    if (showAccountBottomSheet) {
+        AccountSwitcherBottomSheet(
+            onDismiss = { showAccountBottomSheet = false },
+            onSwitchAccount = { account ->
+                viewModel.switchAccount(
+                    context,
+                    account.email,
+                    account.password,
+                    onSwitched = { onSwitchAccount() },
+                    onError = { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+                )
+            },
+            onAddNewAccount = {
+                showAccountBottomSheet = false
+                isRegisteringAccount = false
+                addEmailInput = ""
+                addPasswordInput = ""
+                showAddAccountDialog = true
+            },
+            currentEmail = uiState.currentUser?.email ?: ""
+        )
+    }
+
+    // Add New Account / Create New Account Dialogs (Screenshots 2 & 3)
+    if (showAddAccountDialog) {
+        if (!isRegisteringAccount) {
+            // Screenshot 2: Add New Account (Log In)
+            AlertDialog(
+                onDismissRequest = { showAddAccountDialog = false },
+                shape = RoundedCornerShape(24.dp),
+                title = {
+                    Column {
+                        Text("Add New Account", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("Enter credentials for the new account:", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedTextField(
+                            value = addEmailInput,
+                            onValueChange = { addEmailInput = it },
+                            label = { Text("Email or Username") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = addPasswordInput,
+                            onValueChange = { addPasswordInput = it },
+                            label = { Text("Password") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Add New Account",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp,
-                            color = MaterialTheme.colorScheme.primary
+                            text = "Don't have an account? Register here",
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp,
+                            modifier = Modifier
+                                .clickable {
+                                    isRegisteringAccount = true
+                                    regFullNameInput = ""
+                                    regEmailInput = addEmailInput
+                                    regPasswordInput = addPasswordInput
+                                    regConfirmPasswordInput = ""
+                                }
+                                .padding(vertical = 4.dp)
+                                .align(Alignment.CenterHorizontally)
                         )
                     }
-                }
-
-                Spacer(modifier = Modifier.height(24.dp))
-            }
-        }
-    }
-
-    // Password prompt dialog for legacy accounts without saved password
-    if (accountToSwitch != null) {
-        val acc = accountToSwitch!!
-        AlertDialog(
-            onDismissRequest = { if (!isSwitching) accountToSwitch = null },
-            title = { Text("Enter Password", fontWeight = FontWeight.Bold) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Enter password for ${acc.email} to switch account:")
-                    OutlinedTextField(
-                        value = passwordInput,
-                        onValueChange = { passwordInput = it; switchError = null },
-                        label = { Text("Password") },
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    if (switchError != null) {
-                        Text(switchError!!, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (passwordInput.isBlank()) {
-                            switchError = "Please enter password"
-                            return@Button
-                        }
-                        isSwitching = true
-                        switchError = null
-                        viewModel.switchAccount(context, acc.email, passwordInput, {
-                            isSwitching = false
-                            accountToSwitch = null
-                            onSwitchAccount()
-                        }, { err ->
-                            isSwitching = false
-                            switchError = err
-                        })
-                    },
-                    enabled = !isSwitching
-                ) {
-                    if (isSwitching) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.onPrimary)
-                    } else {
-                        Text("Switch")
-                    }
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { accountToSwitch = null },
-                    enabled = !isSwitching
-                ) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-
-    if (showAddAccountDialog) {
-        var newEmailInput by remember { mutableStateOf("") }
-        var newPasswordInput by remember { mutableStateOf("") }
-        var addAccountError by remember { mutableStateOf<String?>(null) }
-        var isAdding by remember { mutableStateOf(false) }
-
-        AlertDialog(
-            onDismissRequest = { if (!isAdding) showAddAccountDialog = false },
-            title = { Text("Add New Account", fontWeight = FontWeight.Bold) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Enter credentials for the new account:", fontSize = 14.sp)
-                    OutlinedTextField(
-                        value = newEmailInput,
-                        onValueChange = { newEmailInput = it; addAccountError = null },
-                        label = { Text("Email or Username") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = newPasswordInput,
-                        onValueChange = { newPasswordInput = it; addAccountError = null },
-                        label = { Text("Password") },
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    if (addAccountError != null) {
-                        Text(addAccountError!!, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    TextButton(
+                },
+                confirmButton = {
+                    Button(
                         onClick = {
-                            showAddAccountDialog = false
-                            showRegisterDialog = true
+                            if (addEmailInput.isBlank() || addPasswordInput.isBlank()) {
+                                Toast.makeText(context, "Please fill in all fields", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            viewModel.switchAccount(
+                                context,
+                                addEmailInput,
+                                addPasswordInput,
+                                onSwitched = {
+                                    showAddAccountDialog = false
+                                    onSwitchAccount()
+                                },
+                                onError = { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+                            )
                         },
-                        modifier = Modifier.fillMaxWidth()
+                        shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text("Don't have an account? Register here", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (newEmailInput.isBlank() || newPasswordInput.isBlank()) {
-                            addAccountError = "Please enter email and password"
-                            return@Button
-                        }
-                        isAdding = true
-                        addAccountError = null
-                        viewModel.switchAccount(context, newEmailInput.trim(), newPasswordInput, {
-                            isAdding = false
-                            showAddAccountDialog = false
-                            onSwitchAccount()
-                        }, { err ->
-                            isAdding = false
-                            addAccountError = err
-                        })
-                    },
-                    enabled = !isAdding
-                ) {
-                    if (isAdding) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White)
-                    } else {
                         Text("Log In & Add")
                     }
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { if (!isAdding) showAddAccountDialog = false },
-                    enabled = !isAdding
-                ) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-
-    if (showRegisterDialog) {
-        var regNameInput by remember { mutableStateOf("") }
-        var regEmailInput by remember { mutableStateOf("") }
-        var regPasswordInput by remember { mutableStateOf("") }
-        var regConfirmInput by remember { mutableStateOf("") }
-        var regError by remember { mutableStateOf<String?>(null) }
-        var isRegistering by remember { mutableStateOf(false) }
-
-        AlertDialog(
-            onDismissRequest = { if (!isRegistering) showRegisterDialog = false },
-            title = { Text("Create New Account", fontWeight = FontWeight.Bold) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Enter details to register a new account:", fontSize = 14.sp)
-                    OutlinedTextField(
-                        value = regNameInput,
-                        onValueChange = { regNameInput = it; regError = null },
-                        label = { Text("Full Name") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = regEmailInput,
-                        onValueChange = { regEmailInput = it; regError = null },
-                        label = { Text("Email or Username") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = regPasswordInput,
-                        onValueChange = { regPasswordInput = it; regError = null },
-                        label = { Text("Password (min 6 chars)") },
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = regConfirmInput,
-                        onValueChange = { regConfirmInput = it; regError = null },
-                        label = { Text("Confirm Password") },
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    if (regError != null) {
-                        Text(regError!!, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+                },
+                dismissButton = {
+                    TextButton(onClick = { showAddAccountDialog = false }) {
+                        Text("Cancel")
                     }
                 }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (regNameInput.isBlank() || regEmailInput.isBlank() || regPasswordInput.isBlank() || regConfirmInput.isBlank()) {
-                            regError = "Please fill in all fields"
-                            return@Button
-                        }
-                        if (regPasswordInput != regConfirmInput) {
-                            regError = "Passwords do not match"
-                            return@Button
-                        }
-                        if (regPasswordInput.length < 6) {
-                            regError = "Password must be at least 6 characters"
-                            return@Button
-                        }
-                        isRegistering = true
-                        regError = null
-                        coroutineScope.launch {
-                            try {
-                                val result = AuthRepository().register(regNameInput.trim(), regEmailInput.trim(), regPasswordInput)
-                                if (result.isSuccess) {
-                                    val email = if (!regEmailInput.contains("@")) "${regEmailInput.trim()}@talky.com" else regEmailInput.trim()
-                                    SavedAccountManager.saveAccount(
-                                        context,
-                                        email,
-                                        regNameInput.trim(),
-                                        "",
-                                        regPasswordInput
-                                    )
-                                    isRegistering = false
-                                    showRegisterDialog = false
-                                    onSwitchAccount()
-                                } else {
-                                    isRegistering = false
-                                    regError = result.exceptionOrNull()?.localizedMessage ?: "Registration failed"
-                                }
-                            } catch (e: Exception) {
-                                isRegistering = false
-                                regError = e.localizedMessage ?: "Registration failed"
+            )
+        } else {
+            // Screenshot 3: Create New Account (Register)
+            AlertDialog(
+                onDismissRequest = { showAddAccountDialog = false },
+                shape = RoundedCornerShape(24.dp),
+                title = {
+                    Column {
+                        Text("Create New Account", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("Enter details to register a new account:", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedTextField(
+                            value = regFullNameInput,
+                            onValueChange = { regFullNameInput = it },
+                            label = { Text("Full Name") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = regEmailInput,
+                            onValueChange = { regEmailInput = it },
+                            label = { Text("Email or Username") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = regPasswordInput,
+                            onValueChange = { regPasswordInput = it },
+                            label = { Text("Password (min 6 chars)") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = regConfirmPasswordInput,
+                            onValueChange = { regConfirmPasswordInput = it },
+                            label = { Text("Confirm Password") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            if (regFullNameInput.isBlank() || regEmailInput.isBlank() || regPasswordInput.isBlank()) {
+                                Toast.makeText(context, "Please fill in all required fields", Toast.LENGTH_SHORT).show()
+                                return@Button
                             }
-                        }
-                    },
-                    enabled = !isRegistering
-                ) {
-                    if (isRegistering) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White)
-                    } else {
+                            if (regPasswordInput != regConfirmPasswordInput) {
+                                Toast.makeText(context, "Passwords do not match", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            viewModel.registerNewAccountAndSwitch(
+                                context,
+                                regFullNameInput,
+                                regEmailInput,
+                                regPasswordInput,
+                                onSwitched = {
+                                    showAddAccountDialog = false
+                                    onSwitchAccount()
+                                },
+                                onError = { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+                            )
+                        },
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
                         Text("Register & Add")
                     }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showAddAccountDialog = false }) {
+                        Text("Cancel")
+                    }
                 }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { if (!isRegistering) showRegisterDialog = false },
-                    enabled = !isRegistering
-                ) {
-                    Text("Cancel")
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AccountSwitcherBottomSheet(
+    onDismiss: () -> Unit,
+    onSwitchAccount: (SavedAccount) -> Unit,
+    onAddNewAccount: () -> Unit,
+    currentEmail: String
+) {
+    val context = LocalContext.current
+    val savedAccounts = SavedAccountManager.getSavedAccounts(context)
+    val sheetState = rememberModalBottomSheetState()
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 12.dp)
+                .navigationBarsPadding()
+        ) {
+            Text(
+                text = "Switch Account",
+                fontWeight = FontWeight.Bold,
+                fontSize = 20.sp,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.heightIn(max = 350.dp)
+            ) {
+                items(savedAccounts) { account ->
+                    val isActive = account.email.equals(currentEmail, ignoreCase = true)
+                    Surface(
+                        onClick = {
+                            onDismiss()
+                            onSwitchAccount(account)
+                        },
+                        shape = RoundedCornerShape(16.dp),
+                        color = if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .padding(14.dp)
+                                .fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                modifier = Modifier
+                                    .size(46.dp)
+                                    .clip(CircleShape),
+                                color = MaterialTheme.colorScheme.primaryContainer
+                            ) {
+                                if (account.photoUrl.isNotBlank()) {
+                                    AsyncImage(
+                                        model = account.photoUrl,
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(
+                                            text = account.displayName.take(1).uppercase(Locale.getDefault()),
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 18.sp,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(14.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = account.displayName,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = account.email,
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            if (isActive) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.error
+                                ) {
+                                    Text(
+                                        text = "Active",
+                                        color = MaterialTheme.colorScheme.onError,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Add New Account Button
+                item {
+                    Surface(
+                        onClick = {
+                            onDismiss()
+                            onAddNewAccount()
+                        },
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .padding(14.dp)
+                                .fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                modifier = Modifier
+                                    .size(46.dp)
+                                    .clip(CircleShape),
+                                color = MaterialTheme.colorScheme.primary
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = "Add",
+                                        tint = MaterialTheme.colorScheme.onPrimary
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(14.dp))
+
+                            Text(
+                                text = "Add New Account",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
                 }
             }
-        )
+            Spacer(modifier = Modifier.height(24.dp))
+        }
     }
 }
 
@@ -788,6 +669,7 @@ fun ConversationItem(
     recipientId: String,
     recipientName: String,
     currentUserId: String,
+    recipientUser: User?,
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
@@ -810,6 +692,18 @@ fun ConversationItem(
     val isPinned = conversation.isPinnedFor(currentUserId)
     val isMuted = conversation.isMutedFor(currentUserId)
 
+    val timeMs = when (recipientUser?.lastSeenAt) {
+        is Timestamp -> recipientUser.lastSeenAt.toDate().time
+        is java.util.Date -> recipientUser.lastSeenAt.time
+        is Number -> recipientUser.lastSeenAt.toLong()
+        else -> 0L
+    }
+    val isRecentlyActive = timeMs > 0L && (System.currentTimeMillis() - timeMs < 90_000L)
+    val isOnline = (recipientUser?.isOnline == true) || isRecentlyActive
+
+    val unreadCount = conversation.getUnreadCount(currentUserId)
+    val hasUnread = unreadCount > 0 && conversation.lastMessageSenderId != currentUserId
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -820,34 +714,63 @@ fun ConversationItem(
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Surface(
-            modifier = Modifier
-                .size(50.dp)
-                .clip(CircleShape),
-            color = MaterialTheme.colorScheme.primaryContainer
-        ) {
-            if (photoUrl.isNotBlank()) {
-                AsyncImage(
-                    model = photoUrl,
-                    contentDescription = "Profile Picture",
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-            } else if (conversation.type == "group") {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        text = "👥",
-                        fontSize = 22.sp
+        Box(contentAlignment = Alignment.BottomEnd) {
+            Surface(
+                modifier = Modifier
+                    .size(50.dp)
+                    .clip(CircleShape),
+                color = MaterialTheme.colorScheme.primaryContainer
+            ) {
+                if (photoUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = photoUrl,
+                        contentDescription = "Profile Picture",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
                     )
+                } else if (conversation.type == "group") {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = "👥",
+                            fontSize = 22.sp
+                        )
+                    }
+                } else {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = recipientName.take(1).uppercase(Locale.getDefault()),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 20.sp,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
                 }
-            } else {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        text = recipientName.take(1).uppercase(Locale.getDefault()),
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 20.sp,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
+            }
+
+            if (conversation.type != "group" && recipientId.isNotBlank()) {
+                val shortText = if (isOnline) "" else formatShortLastSeen(recipientUser?.lastSeenAt)
+                if (isOnline) {
+                    Box(
+                        modifier = Modifier
+                            .size(13.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF22C55E))
+                            .border(BorderStroke(2.dp, MaterialTheme.colorScheme.surface), CircleShape)
                     )
+                } else if (shortText.isNotBlank()) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFFF0FDF4),
+                        border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.surface)
+                    ) {
+                        Text(
+                            text = shortText,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF166534),
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                        )
+                    }
                 }
             }
         }
@@ -880,7 +803,8 @@ fun ConversationItem(
             Text(
                 text = conversation.lastMessage.ifBlank { "Started a conversation" },
                 fontSize = 14.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = if (hasUnread) FontWeight.Bold else FontWeight.Normal,
+                color = if (hasUnread) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -893,7 +817,98 @@ fun ConversationItem(
             Text(
                 text = formattedTime,
                 fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                fontWeight = if (hasUnread) FontWeight.Bold else FontWeight.Normal,
+                color = if (hasUnread) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (hasUnread) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = if (unreadCount > 99) "99+" else unreadCount.toString(),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+fun formatShortLastSeen(timestamp: Any?): String {
+    val date = when (timestamp) {
+        is Timestamp -> timestamp.toDate()
+        is java.util.Date -> timestamp
+        is Number -> java.util.Date(timestamp.toLong())
+        else -> null
+    }
+    if (date == null) return ""
+
+    val timeMs = date.time
+    val now = System.currentTimeMillis()
+    val diff = now - timeMs
+    if (diff < 0L) return "now"
+
+    val seconds = diff / 1000
+    val minutes = seconds / 60
+    val hours = minutes / 60
+    val days = hours / 24
+
+    return when {
+        minutes < 1 -> "now"
+        minutes < 60 -> "${minutes}m"
+        hours < 24 -> "${hours}h"
+        days < 7 -> "${days}d"
+        else -> {
+            val sdf = java.text.SimpleDateFormat("d/M", Locale.getDefault())
+            sdf.format(date)
+        }
+    }
+}
+
+@Composable
+fun MessageStatusTicks(
+    status: String,
+    modifier: Modifier = Modifier,
+    size: Dp = 14.dp
+) {
+    val normalizedStatus = status.lowercase(Locale.getDefault())
+    when {
+        normalizedStatus == "seen" || normalizedStatus == "read" -> {
+            Text(
+                text = "✓✓",
+                fontSize = (size.value * 0.9).sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF0284C7),
+                modifier = modifier
+            )
+        }
+        normalizedStatus == "delivered" -> {
+            Text(
+                text = "✓✓",
+                fontSize = (size.value * 0.9).sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                modifier = modifier
+            )
+        }
+        else -> {
+            Text(
+                text = "✓",
+                fontSize = (size.value * 0.9).sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                modifier = modifier
             )
         }
     }

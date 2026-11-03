@@ -12,7 +12,9 @@ import android.text.format.DateFormat
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -62,6 +64,9 @@ import com.example.chat.core.utils.CloudinaryUploader
 import com.example.chat.data.model.Message
 import com.example.chat.data.model.User
 import com.example.chat.ui.conversation.components.*
+import com.example.chat.ui.contacts.formatLastSeen
+import com.example.chat.ui.chats.MessageStatusTicks
+import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
@@ -1329,33 +1334,54 @@ fun ConversationScreen(
                             }
                         }
                     ) {
-                        Surface(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape),
-                            color = MaterialTheme.colorScheme.primaryContainer
-                        ) {
-                            val headerPhoto = if (conversation?.type == "group") {
-                                conversation.groupPhoto.ifBlank { conversation.participantPhotos["groupPhoto"] ?: conversation.participantPhotos.values.firstOrNull { it.isNotBlank() } ?: "" }
-                            } else {
-                                uiState.recipientPhoto
-                            }
-                            if (headerPhoto.isNotBlank()) {
-                                AsyncImage(
-                                    model = headerPhoto,
-                                    contentDescription = "Profile Picture",
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop
-                                )
-                            } else {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Text(
-                                        text = displayName.take(1).uppercase(Locale.getDefault()),
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 16.sp,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                                    )
+                        Box(contentAlignment = Alignment.BottomEnd) {
+                            Surface(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape),
+                                color = MaterialTheme.colorScheme.primaryContainer
+                            ) {
+                                val headerPhoto = if (conversation?.type == "group") {
+                                    conversation.groupPhoto.ifBlank { conversation.participantPhotos["groupPhoto"] ?: conversation.participantPhotos.values.firstOrNull { it.isNotBlank() } ?: "" }
+                                } else {
+                                    uiState.recipientPhoto
                                 }
+                                if (headerPhoto.isNotBlank()) {
+                                    AsyncImage(
+                                        model = headerPhoto,
+                                        contentDescription = "Profile Picture",
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(
+                                            text = displayName.take(1).uppercase(Locale.getDefault()),
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 16.sp,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                    }
+                                }
+                            }
+
+                            if (conversation?.type != "group" && recipientId.isNotBlank()) {
+                                val lastSeen = uiState.recipientLastSeenAt
+                                val timeMs = when (lastSeen) {
+                                    is Timestamp -> lastSeen.toDate().time
+                                    is java.util.Date -> lastSeen.time
+                                    is Number -> lastSeen.toLong()
+                                    else -> 0L
+                                }
+                                val isRecentlyActive = timeMs > 0L && (System.currentTimeMillis() - timeMs < 90_000L)
+                                val isOnline = uiState.recipientIsOnline || isRecentlyActive
+                                Box(
+                                    modifier = Modifier
+                                        .size(11.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isOnline) Color(0xFF22C55E) else Color(0xFF9CA3AF))
+                                        .border(BorderStroke(1.5.dp, MaterialTheme.colorScheme.surface), CircleShape)
+                                )
                             }
                         }
                         Spacer(modifier = Modifier.width(12.dp))
@@ -1364,6 +1390,19 @@ fun ConversationScreen(
                             Text(text = displayName, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = textColor)
                             if (conversation?.type == "group") {
                                 Text(text = "${conversation.participantIds.size} members", fontSize = 12.sp, color = textColor.copy(alpha = 0.7f))
+                            } else {
+                                val lastSeen = uiState.recipientLastSeenAt
+                                val timeMs = when (lastSeen) {
+                                    is Timestamp -> lastSeen.toDate().time
+                                    is java.util.Date -> lastSeen.time
+                                    is Number -> lastSeen.toLong()
+                                    else -> 0L
+                                }
+                                val isRecentlyActive = timeMs > 0L && (System.currentTimeMillis() - timeMs < 90_000L)
+                                val isOnline = uiState.recipientIsOnline || isRecentlyActive
+                                val statusText = if (isOnline) "Online" else formatLastSeen(lastSeen)
+                                val statusColor = if (isOnline) Color(0xFF22C55E) else textColor.copy(alpha = 0.7f)
+                                Text(text = statusText, fontSize = 11.sp, color = statusColor)
                             }
                         }
                     }
@@ -1774,12 +1813,27 @@ fun ConversationScreen(
                                         shape = RoundedCornerShape(8.dp),
                                         color = Color.Black.copy(alpha = 0.5f)
                                     ) {
-                                        Text(
-                                            text = DateFormat.format("HH:mm", Calendar.getInstance().apply { timeInMillis = msg.createdAt }).toString(),
-                                            fontSize = 10.sp,
-                                            color = Color.White,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                        )
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = DateFormat.format("HH:mm", Calendar.getInstance().apply { timeInMillis = msg.createdAt }).toString(),
+                                                fontSize = 10.sp,
+                                                color = Color.White
+                                            )
+                                            if (isMe) {
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                val status = if (msg.readBy.contains(recipientId) || msg.status == "seen" || msg.status == "read") {
+                                                    "seen"
+                                                } else if (msg.status == "delivered" || uiState.recipientIsOnline) {
+                                                    "delivered"
+                                                } else {
+                                                    "sent"
+                                                }
+                                                MessageStatusTicks(status = status, size = 11.dp)
+                                            }
+                                        }
                                     }
                                 }
                             } else {
@@ -1831,12 +1885,27 @@ fun ConversationScreen(
                                         }
 
                                         Spacer(modifier = Modifier.height(4.dp))
-                                        Text(
-                                            text = DateFormat.format("HH:mm", Calendar.getInstance().apply { timeInMillis = msg.createdAt }).toString(),
-                                            fontSize = 10.sp,
-                                            color = if (themeColor == "dark") Color.LightGray else MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.align(Alignment.End)
-                                        )
+                                        Row(
+                                            modifier = Modifier.align(Alignment.End),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = DateFormat.format("HH:mm", Calendar.getInstance().apply { timeInMillis = msg.createdAt }).toString(),
+                                                fontSize = 10.sp,
+                                                color = if (themeColor == "dark") Color.LightGray else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            if (isMe) {
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                val status = if (msg.readBy.contains(recipientId) || msg.status == "seen" || msg.status == "read") {
+                                                    "seen"
+                                                } else if (msg.status == "delivered" || uiState.recipientIsOnline) {
+                                                    "delivered"
+                                                } else {
+                                                    "sent"
+                                                }
+                                                MessageStatusTicks(status = status, size = 11.dp)
+                                            }
+                                        }
                                     }
                                 }
                             }

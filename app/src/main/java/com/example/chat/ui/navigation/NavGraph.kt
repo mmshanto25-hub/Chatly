@@ -162,19 +162,16 @@ fun ChatNavGraph() {
                     },
                     onNavToCall = { callType ->
                         val myId = conversationViewModel.currentUserId
-                        val channelName = "test_${myId}_${recipientId}"
-
                         val firestore = FirebaseFirestore.getInstance()
 
                         CoroutineScope(Dispatchers.Main).launch {
+                            var channelName = ""
                             try {
                                 kotlinx.coroutines.withContext(Dispatchers.IO) {
-                                    val oldCalls = firestore.collection("calls").whereEqualTo("channelName", channelName).get().await()
-                                    for (oldDoc in oldCalls.documents) {
-                                        oldDoc.reference.delete().await()
-                                    }
-
                                     val callRef = firestore.collection("calls").document()
+                                    val callId = callRef.id
+                                    channelName = "test_${myId}_${recipientId}_${callId}"
+
                                     val recipientDoc = try {
                                         firestore.collection("users").document(recipientId).get().await()
                                     } catch (_: Exception) {
@@ -192,7 +189,7 @@ fun ChatNavGraph() {
                                     val myPhoto = currentUserDoc?.getString("photoUrl") ?: ""
 
                                     val callData = mapOf(
-                                        "callId" to callRef.id,
+                                        "callId" to callId,
                                         "channelName" to channelName,
                                         "callerId" to myId,
                                         "receiverId" to recipientId,
@@ -208,7 +205,9 @@ fun ChatNavGraph() {
                                 }
                             } catch (_: Exception) {}
 
-                            navController.navigate("call/$channelName?callType=$callType")
+                            if (channelName.isNotBlank()) {
+                                navController.navigate("call/$channelName?callType=$callType")
+                            }
                         }
                     }
                 )

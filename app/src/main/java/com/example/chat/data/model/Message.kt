@@ -6,6 +6,7 @@ data class Message(
     val senderId: String = "",
     val text: String = "",
     val messageType: String = "text",
+    val status: String = "sent",
     val createdAt: Long = System.currentTimeMillis(),
     val readBy: List<String> = emptyList(),
     val attachmentUrl: String = "",

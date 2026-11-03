@@ -8,14 +8,17 @@ import com.example.chat.data.model.Conversation
 import com.example.chat.data.model.User
 import com.example.chat.data.repository.AuthRepository
 import com.example.chat.data.repository.ChatRepository
+import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import java.util.Locale
 
 data class ChatListUiState(
     val currentUser: User? = null,
     val conversations: List<Conversation> = emptyList(),
     val filteredConversations: List<Conversation> = emptyList(),
+    val usersMap: Map<String, User> = emptyMap(),
     val selectedFilter: String = "All",
     val searchQuery: String = "",
     val showArchived: Boolean = false,
@@ -40,12 +43,55 @@ class ChatListViewModel : ViewModel() {
             val user = authRepository.getCurrentUserData()
             _uiState.update { it.copy(currentUser = user) }
 
+            FirebaseFirestore.getInstance().collection("users").addSnapshotListener { snapshot, _ ->
+                if (snapshot != null) {
+                    val map = snapshot.documents.mapNotNull { it.toObject(User::class.java) }
+                        .associateBy { it.uid }
+                    _uiState.update { it.copy(usersMap = map) }
+                }
+            }
+
             if (currentUserId.isNotBlank()) {
                 chatRepository.getConversationsFlow(currentUserId).collect { convs ->
                     val filtered = applyFilter(convs, _uiState.value.selectedFilter, _uiState.value.showArchived, _uiState.value.searchQuery)
                     _uiState.update { it.copy(conversations = convs, filteredConversations = filtered, isLoading = false) }
+                    markIncomingMessagesAsDelivered(convs)
                 }
             }
+        }
+    }
+
+    private fun markIncomingMessagesAsDelivered(conversations: List<Conversation>) {
+        if (currentUserId.isBlank()) return
+        viewModelScope.launch {
+            try {
+                val firestore = FirebaseFirestore.getInstance()
+                for (conv in conversations) {
+                    val undeliveredQuery = firestore.collection("conversations")
+                        .document(conv.conversationId)
+                        .collection("messages")
+                        .whereEqualTo("status", "sent")
+                        .get()
+                        .await()
+
+                    val batch = firestore.batch()
+                    var hasUpdates = false
+                    for (doc in undeliveredQuery.documents) {
+                        val senderId = doc.getString("senderId") ?: ""
+                        if (senderId != currentUserId) {
+                            batch.update(doc.reference, "status", "delivered")
+                            hasUpdates = true
+                        }
+                    }
+                    if (hasUpdates) {
+                        if (conv.lastMessageSenderId != currentUserId && conv.lastMessageStatus == "sent") {
+                            val convRef = firestore.collection("conversations").document(conv.conversationId)
+                            batch.update(convRef, "lastMessageStatus", "delivered")
+                        }
+                        batch.commit().await()
+                    }
+                }
+            } catch (_: Exception) {}
         }
     }
 
@@ -140,6 +186,33 @@ class ChatListViewModel : ViewModel() {
                 onSwitched()
             } else {
                 onError(result.exceptionOrNull()?.localizedMessage ?: "Failed to switch account")
+            }
+        }
+    }
+
+    fun registerNewAccountAndSwitch(
+        context: Context,
+        fullName: String,
+        emailOrUsername: String,
+        password: String,
+        onSwitched: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        viewModelScope.launch {
+            val result = authRepository.register(fullName, emailOrUsername, password)
+            if (result.isSuccess) {
+                val userData = authRepository.getCurrentUserData()
+                val email = if (!emailOrUsername.contains("@")) "$emailOrUsername@talky.com" else emailOrUsername
+                SavedAccountManager.saveAccount(
+                    context,
+                    email,
+                    fullName,
+                    userData?.photoUrl ?: "",
+                    password
+                )
+                onSwitched()
+            } else {
+                onError(result.exceptionOrNull()?.localizedMessage ?: "Failed to register new account")
             }
         }
     }

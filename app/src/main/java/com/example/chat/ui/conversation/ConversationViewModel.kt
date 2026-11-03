@@ -21,6 +21,8 @@ data class ConversationUiState(
     val messages: List<Message> = emptyList(),
     val conversation: Conversation? = null,
     val recipientPhoto: String = "",
+    val recipientIsOnline: Boolean = false,
+    val recipientLastSeenAt: Any? = null,
     val isLoading: Boolean = true,
     val messageInput: String = "",
     val isUploading: Boolean = false,
@@ -68,7 +70,9 @@ class ConversationViewModel(
                                 if (user != null) {
                                     _uiState.update {
                                         it.copy(
-                                            recipientPhoto = user.photoUrl.ifBlank { recipientPhoto }
+                                            recipientPhoto = user.photoUrl.ifBlank { recipientPhoto },
+                                            recipientIsOnline = user.isOnline,
+                                            recipientLastSeenAt = user.lastSeenAt
                                         )
                                     }
                                 }
@@ -79,7 +83,49 @@ class ConversationViewModel(
 
             chatRepository.getMessagesFlow(conversationId).collect { messages ->
                 _uiState.update { it.copy(messages = messages, isLoading = false) }
+                markMessagesAsSeen(messages)
             }
+        }
+    }
+
+    private fun markMessagesAsSeen(messages: List<Message>) {
+        if (currentUserId.isBlank()) return
+
+        viewModelScope.launch {
+            try {
+                val unread = messages.filter {
+                    it.senderId != currentUserId && (it.status != "seen" || !it.readBy.contains(currentUserId))
+                }
+
+                if (unread.isNotEmpty()) {
+                    val batch = firestore.batch()
+                    for (msg in unread) {
+                        val ref = firestore.collection("conversations")
+                            .document(conversationId)
+                            .collection("messages")
+                            .document(msg.messageId)
+                        batch.update(ref, mapOf("status" to "seen", "readBy" to com.google.firebase.firestore.FieldValue.arrayUnion(currentUserId)))
+                    }
+                    batch.commit().await()
+                }
+
+                val convDoc = firestore.collection("conversations").document(conversationId).get().await()
+                val currentUnreads = (convDoc["unreadCounts"] as? Map<*, *>)?.mapNotNull { (k, v) ->
+                    val key = k as? String
+                    val value = (v as? Number)?.toInt()
+                    if (key != null && value != null) key to value else null
+                }?.toMap()?.toMutableMap() ?: mutableMapOf()
+
+                if ((currentUnreads[currentUserId] ?: 0) > 0 || unread.isNotEmpty()) {
+                    currentUnreads[currentUserId] = 0
+                    firestore.collection("conversations").document(conversationId).update(
+                        mapOf(
+                            "lastMessageStatus" to "seen",
+                            "unreadCounts" to currentUnreads
+                        )
+                    ).await()
+                }
+            } catch (_: Exception) {}
         }
     }
 
