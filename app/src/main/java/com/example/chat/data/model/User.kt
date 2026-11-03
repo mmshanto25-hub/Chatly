@@ -12,5 +12,7 @@ data class User(
     val profileVisitorsCount: Int = 0,
     val createdAt: Long = System.currentTimeMillis(),
     val lastSeenAt: Long = System.currentTimeMillis(),
-    val presence: String = "offline"
+    val presence: String = "offline",
+    val isOnline: Boolean = false,
+    val lastSeen: Long = System.currentTimeMillis()
 )

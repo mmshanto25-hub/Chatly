@@ -68,6 +68,17 @@ fun TestCallScreen(
     var otherPersonName by remember { mutableStateOf("User") }
     var otherPersonPhoto by remember { mutableStateOf("") }
     var callStatus by remember { mutableStateOf("calling") }
+    var hasNavigatedBack by remember { mutableStateOf(false) }
+
+    fun safeNavBack() {
+        if (!hasNavigatedBack) {
+            hasNavigatedBack = true
+            try {
+                rtcEngine?.leaveChannel()
+            } catch (_: Exception) {}
+            onNavBack()
+        }
+    }
 
     // Real-time listener for call status and participant info from Firestore
     DisposableEffect(channelName) {
@@ -88,10 +99,7 @@ fun TestCallScreen(
                     if (status.equals("ended", ignoreCase = true) ||
                         status.equals("rejected", ignoreCase = true) ||
                         status.equals("declined", ignoreCase = true)) {
-                        try {
-                            rtcEngine?.leaveChannel()
-                        } catch (_: Exception) {}
-                        onNavBack()
+                        safeNavBack()
                         return@addSnapshotListener
                     }
 
@@ -166,6 +174,7 @@ fun TestCallScreen(
             engine.enableAudio()
             engine.enableVideo()
             engine.setEnableSpeakerphone(true)
+            engine.setChannelProfile(Constants.CHANNEL_PROFILE_COMMUNICATION)
 
             if (isAudioCall) {
                 engine.disableVideo()
@@ -219,15 +228,7 @@ fun TestCallScreen(
                 }
         } catch (_: Exception) {}
 
-        val engine = rtcEngine ?: return
-        try {
-            engine.leaveChannel()
-            isJoined = false
-            remoteUid = null
-            onNavBack()
-        } catch (_: Exception) {
-            onNavBack()
-        }
+        safeNavBack()
     }
 
     Surface(
@@ -592,7 +593,7 @@ fun AudioCallScreen(
         ) {
             Box(
                 contentAlignment = Alignment.Center,
-                modifier = Modifier.padding(horizontal = 58.dp, vertical = 10.dp)
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp)
             ) {
                 Text(
                     text = otherPersonName,

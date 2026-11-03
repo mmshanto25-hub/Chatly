@@ -11,10 +11,27 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.util.Locale
 
+data class CallHistoryLog(
+    val callId: String = "",
+    val channelName: String = "",
+    val otherPersonId: String = "",
+    val otherPersonName: String = "",
+    val otherPersonPhoto: String = "",
+    val callType: String = "audio",
+    val status: String = "calling",
+    val isOutgoing: Boolean = true,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
 data class UserSearchUiState(
     val searchQuery: String = "",
+    val selectedTab: Int = 2, // 0: Contacts (chatted), 1: Call List, 2: User List (default)
     val allUsers: List<User> = emptyList(),
+    val chatContacts: List<User> = emptyList(),
+    val callLogs: List<CallHistoryLog> = emptyList(),
     val searchResults: List<User> = emptyList(),
+    val chatContactsFiltered: List<User> = emptyList(),
+    val callLogsFiltered: List<CallHistoryLog> = emptyList(),
     val isLoading: Boolean = true,
     val errorMessage: String? = null
 )
@@ -29,6 +46,13 @@ class UserSearchViewModel : ViewModel() {
 
     init {
         loadAllUsers()
+        loadChatContacts()
+        loadCallLogs()
+    }
+
+    fun selectTab(tabIndex: Int) {
+        _uiState.update { it.copy(selectedTab = tabIndex) }
+        updateSearchQuery(uiState.value.searchQuery)
     }
 
     private fun loadAllUsers() {
@@ -42,33 +66,110 @@ class UserSearchViewModel : ViewModel() {
                 val users = snapshot.documents.mapNotNull { it.toObject(User::class.java) }
                     .filter { it.uid != currentUserId }
                 _uiState.update { state ->
-                    val trimmed = state.searchQuery.trim().lowercase(Locale.getDefault())
-                    val filtered = if (trimmed.isBlank()) {
-                        users
-                    } else {
-                        users.filter { user ->
-                            user.displayName.lowercase(Locale.getDefault()).contains(trimmed) ||
-                            user.email.lowercase(Locale.getDefault()).contains(trimmed)
-                        }
-                    }
-                    state.copy(allUsers = users, searchResults = filtered, isLoading = false)
+                    state.copy(allUsers = users, isLoading = false)
                 }
+                filterData(uiState.value.searchQuery)
             }
         }
     }
 
+    private fun loadChatContacts() {
+        if (currentUserId.isBlank()) return
+        firestore.collection("conversations")
+            .whereArrayContains("participantIds", currentUserId)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+                val otherParticipantIds = snapshot.documents.mapNotNull { doc ->
+                    val participants = doc["participantIds"] as? List<*>
+                    participants?.firstOrNull { it != currentUserId } as? String
+                }.distinct()
+
+                if (otherParticipantIds.isNotEmpty()) {
+                    firestore.collection("users")
+                        .whereIn("uid", otherParticipantIds.take(30))
+                        .addSnapshotListener { userSnap, _ ->
+                            if (userSnap != null) {
+                                val contacts = userSnap.documents.mapNotNull { it.toObject(User::class.java) }
+                                _uiState.update { it.copy(chatContacts = contacts) }
+                                filterData(uiState.value.searchQuery)
+                            }
+                        }
+                } else {
+                    _uiState.update { it.copy(chatContacts = emptyList()) }
+                    filterData(uiState.value.searchQuery)
+                }
+            }
+    }
+
+    private fun loadCallLogs() {
+        if (currentUserId.isBlank()) return
+        firestore.collection("calls")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+                val logs = snapshot.documents.mapNotNull { doc ->
+                    val callerId = doc.getString("callerId") ?: ""
+                    val receiverId = doc.getString("receiverId") ?: ""
+                    if (callerId == currentUserId || receiverId == currentUserId) {
+                        val isOutgoing = (callerId == currentUserId)
+                        CallHistoryLog(
+                            callId = doc.id,
+                            channelName = doc.getString("channelName") ?: "",
+                            otherPersonId = if (isOutgoing) receiverId else callerId,
+                            otherPersonName = if (isOutgoing) (doc.getString("receiverName") ?: "User") else (doc.getString("callerName") ?: "User"),
+                            otherPersonPhoto = if (isOutgoing) (doc.getString("receiverPhoto") ?: "") else (doc.getString("callerPhoto") ?: ""),
+                            callType = doc.getString("callType") ?: "audio",
+                            status = doc.getString("status") ?: "calling",
+                            isOutgoing = isOutgoing,
+                            timestamp = doc.getLong("timestamp") ?: System.currentTimeMillis()
+                        )
+                    } else null
+                }.sortedByDescending { it.timestamp }
+
+                _uiState.update { it.copy(callLogs = logs) }
+                filterData(uiState.value.searchQuery)
+            }
+    }
+
     fun updateSearchQuery(query: String) {
         _uiState.update { it.copy(searchQuery = query) }
+        filterData(query)
+    }
+
+    private fun filterData(query: String) {
         val trimmed = query.trim().lowercase(Locale.getDefault())
-        val filtered = if (trimmed.isBlank()) {
-            uiState.value.allUsers
-        } else {
-            uiState.value.allUsers.filter { user ->
-                user.displayName.lowercase(Locale.getDefault()).contains(trimmed) ||
-                user.email.lowercase(Locale.getDefault()).contains(trimmed)
+        _uiState.update { state ->
+            val filteredUsers = if (trimmed.isBlank()) {
+                state.allUsers
+            } else {
+                state.allUsers.filter { user ->
+                    user.displayName.lowercase(Locale.getDefault()).contains(trimmed) ||
+                    user.email.lowercase(Locale.getDefault()).contains(trimmed)
+                }
             }
+
+            val filteredContacts = if (trimmed.isBlank()) {
+                state.chatContacts
+            } else {
+                state.chatContacts.filter { user ->
+                    user.displayName.lowercase(Locale.getDefault()).contains(trimmed) ||
+                    user.email.lowercase(Locale.getDefault()).contains(trimmed)
+                }
+            }
+
+            val filteredLogs = if (trimmed.isBlank()) {
+                state.callLogs
+            } else {
+                state.callLogs.filter { log ->
+                    log.otherPersonName.lowercase(Locale.getDefault()).contains(trimmed)
+                }
+            }
+
+            state.copy(
+                searchResults = filteredUsers,
+                chatContactsFiltered = filteredContacts,
+                callLogsFiltered = filteredLogs
+            )
         }
-        _uiState.update { it.copy(searchResults = filtered) }
     }
 
     fun startConversation(recipient: User, onConversationReady: (conversationId: String) -> Unit) {
@@ -188,5 +289,10 @@ class UserSearchViewModel : ViewModel() {
                 _uiState.update { it.copy(errorMessage = "Failed to initiate call: ${e.localizedMessage}") }
             }
         }
+    }
+
+    fun initiateCallByLog(callLog: CallHistoryLog, onCallReady: (channelName: String) -> Unit) {
+        val targetUser = User(uid = callLog.otherPersonId, displayName = callLog.otherPersonName, photoUrl = callLog.otherPersonPhoto)
+        initiateCall(targetUser, callType = callLog.callType, onCallReady = onCallReady)
     }
 }

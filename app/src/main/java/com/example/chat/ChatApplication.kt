@@ -12,6 +12,7 @@ class ChatApplication : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        com.example.chat.core.utils.PresenceManager.init()
     }
 
     override fun newImageLoader(): ImageLoader {
