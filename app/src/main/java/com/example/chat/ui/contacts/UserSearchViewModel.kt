@@ -23,9 +23,15 @@ data class CallHistoryLog(
     val timestamp: Long = System.currentTimeMillis()
 )
 
+enum class UserSortMode {
+    ONLINE_ACTIVITY,
+    NAME_A_TO_Z
+}
+
 data class UserSearchUiState(
     val searchQuery: String = "",
     val selectedTab: Int = 2, // 0: Contacts (chatted), 1: Call List, 2: User List (default)
+    val userSortMode: UserSortMode = UserSortMode.ONLINE_ACTIVITY,
     val allUsers: List<User> = emptyList(),
     val chatContacts: List<User> = emptyList(),
     val callLogs: List<CallHistoryLog> = emptyList(),
@@ -43,11 +49,18 @@ class UserSearchViewModel : ViewModel() {
 
     private val _uiState = MutableStateFlow(UserSearchUiState())
     val uiState: StateFlow<UserSearchUiState> = _uiState.asStateFlow()
+    private var chatContactIds: Set<String> = emptySet()
 
     init {
         loadAllUsers()
         loadChatContacts()
         loadCallLogs()
+        viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(30_000L)
+                filterData(uiState.value.searchQuery)
+            }
+        }
     }
 
     fun selectTab(tabIndex: Int) {
@@ -66,7 +79,11 @@ class UserSearchViewModel : ViewModel() {
                 val users = snapshot.documents.mapNotNull { it.toObject(User::class.java) }
                     .filter { it.uid != currentUserId }
                 _uiState.update { state ->
-                    state.copy(allUsers = users, isLoading = false)
+                    state.copy(
+                        allUsers = users,
+                        chatContacts = users.filter { it.uid in chatContactIds },
+                        isLoading = false
+                    )
                 }
                 filterData(uiState.value.searchQuery)
             }
@@ -84,20 +101,11 @@ class UserSearchViewModel : ViewModel() {
                     participants?.firstOrNull { it != currentUserId } as? String
                 }.distinct()
 
-                if (otherParticipantIds.isNotEmpty()) {
-                    firestore.collection("users")
-                        .whereIn("uid", otherParticipantIds.take(30))
-                        .addSnapshotListener { userSnap, _ ->
-                            if (userSnap != null) {
-                                val contacts = userSnap.documents.mapNotNull { it.toObject(User::class.java) }
-                                _uiState.update { it.copy(chatContacts = contacts) }
-                                filterData(uiState.value.searchQuery)
-                            }
-                        }
-                } else {
-                    _uiState.update { it.copy(chatContacts = emptyList()) }
-                    filterData(uiState.value.searchQuery)
+                chatContactIds = otherParticipantIds.toSet()
+                _uiState.update { state ->
+                    state.copy(chatContacts = state.allUsers.filter { it.uid in chatContactIds })
                 }
+                filterData(uiState.value.searchQuery)
             }
     }
 
@@ -135,6 +143,47 @@ class UserSearchViewModel : ViewModel() {
         filterData(query)
     }
 
+    fun setUserSortMode(sortMode: UserSortMode) {
+        _uiState.update { it.copy(userSortMode = sortMode) }
+        filterData(uiState.value.searchQuery)
+    }
+
+    private fun lastSeenTimeMillis(user: User): Long = when (val lastSeen = user.lastSeenAt) {
+        is com.google.firebase.Timestamp -> lastSeen.toDate().time
+        is java.util.Date -> lastSeen.time
+        is Number -> lastSeen.toLong()
+        else -> 0L
+    }
+
+    private fun isCurrentlyOnline(user: User, now: Long): Boolean {
+        val lastSeen = lastSeenTimeMillis(user)
+        return user.isOnline || (lastSeen > 0L && now - lastSeen in 0..90_000L)
+    }
+
+    private fun userName(user: User): String =
+        user.displayName.trim().ifBlank { user.username.ifBlank { user.email } }
+            .lowercase(Locale.getDefault())
+
+    private fun sortUsers(users: List<User>, sortMode: UserSortMode): List<User> {
+        if (sortMode == UserSortMode.NAME_A_TO_Z) {
+            return users.sortedBy(::userName)
+        }
+
+        val now = System.currentTimeMillis()
+        return users.sortedWith(Comparator { left, right ->
+            val leftOnline = isCurrentlyOnline(left, now)
+            val rightOnline = isCurrentlyOnline(right, now)
+            when {
+                leftOnline != rightOnline -> rightOnline.compareTo(leftOnline)
+                leftOnline -> {
+                    val recentFirst = lastSeenTimeMillis(right).compareTo(lastSeenTimeMillis(left))
+                    if (recentFirst != 0) recentFirst else userName(left).compareTo(userName(right))
+                }
+                else -> userName(left).compareTo(userName(right))
+            }
+        })
+    }
+
     private fun filterData(query: String) {
         val trimmed = query.trim().lowercase(Locale.getDefault())
         _uiState.update { state ->
@@ -145,7 +194,7 @@ class UserSearchViewModel : ViewModel() {
                     user.displayName.lowercase(Locale.getDefault()).contains(trimmed) ||
                     user.email.lowercase(Locale.getDefault()).contains(trimmed)
                 }
-            }
+            }.let { sortUsers(it, state.userSortMode) }
 
             val filteredContacts = if (trimmed.isBlank()) {
                 state.chatContacts
@@ -154,7 +203,7 @@ class UserSearchViewModel : ViewModel() {
                     user.displayName.lowercase(Locale.getDefault()).contains(trimmed) ||
                     user.email.lowercase(Locale.getDefault()).contains(trimmed)
                 }
-            }
+            }.let { sortUsers(it, state.userSortMode) }
 
             val filteredLogs = if (trimmed.isBlank()) {
                 state.callLogs

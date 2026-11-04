@@ -13,5 +13,7 @@ data class User(
     val profileVisitorsCount: Int = 0,
     val createdAt: Long = System.currentTimeMillis(),
     val isOnline: Boolean = false,
-    val lastSeenAt: Any? = null
+    val lastSeenAt: Any? = null,
+    val storyNote: String = "",
+    val storyNoteExpiresAt: Long = 0L
 )

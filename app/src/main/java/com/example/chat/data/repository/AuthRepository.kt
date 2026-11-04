@@ -1,5 +1,7 @@
 package com.example.chat.data.repository
 
+import android.util.Log
+import com.example.chat.core.utils.FcmTokenManager
 import com.example.chat.data.model.User
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -28,6 +30,7 @@ class AuthRepository {
 
     suspend fun login(emailOrUsername: String, password: String): Result<Unit> {
         val a = auth ?: return Result.failure(Exception("Firebase Auth is not initialized. Please add your google-services.json file."))
+        val previousUserId = currentUserId
         return try {
             val email = if (!emailOrUsername.contains("@")) {
                 "${emailOrUsername.trim()}@talky.com"
@@ -36,6 +39,15 @@ class AuthRepository {
             }
             a.signInWithEmailAndPassword(email, password).await()
             ensureUserExistsInFirestore()
+            val signedInUserId = currentUserId
+            if (previousUserId != null && previousUserId != signedInUserId) {
+                try {
+                    FcmTokenManager.removeCurrentUserToken(previousUserId)
+                } catch (error: Exception) {
+                    Log.e("AuthRepository", "Failed to remove notification token from previous account", error)
+                }
+            }
+            FcmTokenManager.syncCurrentUserToken()
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -76,8 +88,15 @@ class AuthRepository {
     }
 
     suspend fun logout() {
+        val uid = currentUserId
+        if (uid != null) {
+            try {
+                FcmTokenManager.removeCurrentUserToken(uid)
+            } catch (error: Exception) {
+                Log.e("AuthRepository", "Failed to remove notification token during logout", error)
+            }
+        }
         try {
-            val uid = currentUserId
             if ((uid != null) && (firestore != null)) {
                 firestore.collection("users").document(uid).update(
                     mapOf(

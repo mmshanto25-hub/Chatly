@@ -1,8 +1,7 @@
 package com.example.chat.data.repository
 
-import com.example.chat.ChatApplication
-import com.example.chat.core.utils.ActiveChatTracker
-import com.example.chat.core.utils.NotificationHelper
+import android.util.Log
+import com.example.chat.data.model.AppNotification
 import com.example.chat.data.model.Conversation
 import com.example.chat.data.model.Message
 import com.example.chat.data.model.User
@@ -250,21 +249,6 @@ class ChatRepository {
                                     } catch (_: Exception) {}
                                 }
                             }
-                            if (conv.conversationId != ActiveChatTracker.activeConversationId) {
-                                val timeDiff = System.currentTimeMillis() - conv.lastMessageAt
-                                if (timeDiff < 20000) {
-                                    val senderName = conv.participantNames[conv.lastMessageSenderId] ?: "Talky"
-                                    try {
-                                        NotificationHelper.showMessageNotification(
-                                            ChatApplication.instance,
-                                            senderName,
-                                            conv.lastMessage,
-                                            conv.conversationId,
-                                            conv.lastMessageSenderId
-                                        )
-                                    } catch (_: Exception) {}
-                                }
-                            }
                         }
                     }
                 }
@@ -375,6 +359,37 @@ class ChatRepository {
                         "updatedAt" to System.currentTimeMillis()
                     )
                 ).await()
+
+            val participantNames = convDoc["participantNames"] as? Map<*, *> ?: emptyMap<Any, Any>()
+            val participantPhotos = convDoc["participantPhotos"] as? Map<*, *> ?: emptyMap<Any, Any>()
+            participants.orEmpty().filterIsInstance<String>()
+                .filter { it != senderId }
+                .forEach { recipientId ->
+                    try {
+                        val notificationRef = db.collection("users")
+                            .document(recipientId)
+                            .collection("notifications")
+                            .document()
+                        notificationRef.set(
+                            AppNotification(
+                                notificationId = notificationRef.id,
+                                type = "message",
+                                actorId = senderId,
+                                actorName = participantNames[senderId] as? String ?: "User",
+                                actorPhoto = participantPhotos[senderId] as? String ?: "",
+                                message = if (type == "group") {
+                                    "sent a message in ${convDoc.getString("groupName").orEmpty().ifBlank { "a group" }}"
+                                } else {
+                                    "sent you a message"
+                                },
+                                createdAt = message.createdAt,
+                                conversationId = conversationId
+                            )
+                        ).await()
+                    } catch (error: Exception) {
+                        Log.e("ChatRepository", "Failed to create in-app message notification", error)
+                    }
+                }
 
             Result.success(Unit)
         } catch (_: Exception) {

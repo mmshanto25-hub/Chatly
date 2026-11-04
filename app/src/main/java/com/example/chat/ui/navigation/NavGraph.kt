@@ -153,9 +153,14 @@ fun ChatNavGraph() {
                 val recipientId = backStackEntry.arguments?.getString("recipientId") ?: ""
                 val recipientName = backStackEntry.arguments?.getString("recipientName") ?: "Chat"
                 val conversationViewModel = rememberInstanceViewModel(conversationId)
+                val chatsBackStackEntry = remember(navController) {
+                    navController.getBackStackEntry("chats")
+                }
+                val chatListViewModel: ChatListViewModel = viewModel(chatsBackStackEntry)
 
                 ConversationScreen(
                     viewModel = conversationViewModel,
+                    chatListViewModel = chatListViewModel,
                     recipientName = recipientName,
                     onNavBack = { navController.popBackStack() },
                     onNavToChat = { convId, recId, name ->
@@ -261,8 +266,16 @@ fun ChatNavGraph() {
                 )
             }
             composable("profile") {
+                val chatsBackStackEntry = remember(navController) {
+                    navController.getBackStackEntry("chats")
+                }
+                val chatListViewModel: ChatListViewModel = viewModel(chatsBackStackEntry)
                 ProfileScreen(
-                    onNavBack = { navController.popBackStack() }
+                    viewModel = chatListViewModel,
+                    onNavBack = { navController.popBackStack() },
+                    onNavToChat = { conversationId, recipientId, recipientName ->
+                        navController.navigate("conversation/$conversationId/$recipientId/$recipientName")
+                    }
                 )
             }
             composable("settings") {
