@@ -988,10 +988,13 @@ fun ConversationScreen(
                         val u = recipientUser!!
                         val profilePics = (listOf(u.photoUrl) + u.profilePictures).filter { it.isNotBlank() }.distinct()
                         val coverPics = (listOf(u.coverPhotoUrl) + u.coverPictures).filter { it.isNotBlank() }.distinct()
+                        val storyPics = u.stories.filter { it.isNotBlank() }.distinct()
+
                         val displayedPics = when(selectedGalleryFolder) {
                             "profile" -> profilePics
                             "cover" -> coverPics
-                            else -> (profilePics + coverPics).distinct()
+                            "stories" -> storyPics
+                            else -> (profilePics + coverPics + storyPics).distinct()
                         }
 
                         LazyColumn(
@@ -1097,13 +1100,14 @@ fun ConversationScreen(
 
                                 // Folder Tabs
                                 ScrollableTabRow(
-                                    selectedTabIndex = when(selectedGalleryFolder) { "profile" -> 1; "cover" -> 2; else -> 0 },
+                                    selectedTabIndex = when(selectedGalleryFolder) { "profile" -> 1; "cover" -> 2; "stories" -> 3; else -> 0 },
                                     edgePadding = 0.dp,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Tab(selected = selectedGalleryFolder == "all", onClick = { selectedGalleryFolder = "all" }, text = { Text("🖼️ All (${(profilePics + coverPics).distinct().size})") })
+                                    Tab(selected = selectedGalleryFolder == "all", onClick = { selectedGalleryFolder = "all" }, text = { Text("🖼️ All (${(profilePics + coverPics + storyPics).distinct().size})") })
                                     Tab(selected = selectedGalleryFolder == "profile", onClick = { selectedGalleryFolder = "profile" }, text = { Text("👤 Profile (${profilePics.size})") })
                                     Tab(selected = selectedGalleryFolder == "cover", onClick = { selectedGalleryFolder = "cover" }, text = { Text("🌅 Cover (${coverPics.size})") })
+                                    Tab(selected = selectedGalleryFolder == "stories", onClick = { selectedGalleryFolder = "stories" }, text = { Text("📖 Stories (${storyPics.size})") })
                                 }
 
                                 Spacer(modifier = Modifier.height(12.dp))
@@ -1836,6 +1840,8 @@ fun ConversationScreen(
                                         }
                                     }
                                 }
+                            } else if (msg.messageType.startsWith("call", ignoreCase = true)) {
+                                CallMessageBubble(msg = msg, isMe = isMe, themeColor = themeColor)
                             } else {
                                 Surface(
                                     shape = RoundedCornerShape(16.dp),

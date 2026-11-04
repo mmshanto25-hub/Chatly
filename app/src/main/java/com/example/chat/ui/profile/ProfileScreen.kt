@@ -7,7 +7,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -33,7 +32,6 @@ import com.example.chat.core.utils.CloudinaryUploader
 import com.example.chat.data.repository.AuthRepository
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
@@ -55,9 +53,9 @@ fun ProfileScreen(
     var coverPhotoUrl by remember { mutableStateOf("") }
     var profilePictures by remember { mutableStateOf<List<String>>(emptyList()) }
     var coverPictures by remember { mutableStateOf<List<String>>(emptyList()) }
-    var profileVisitorsCount by remember { mutableStateOf(0) }
+    var savedStories by remember { mutableStateOf<List<String>>(emptyList()) }
 
-    var selectedGalleryFolder by remember { mutableStateOf("all") } // "all", "profile", "cover"
+    var selectedGalleryFolder by remember { mutableStateOf("all") } // "all", "profile", "cover", "stories"
     var isGridView by remember { mutableStateOf(true) }
     var isSaving by remember { mutableStateOf(false) }
     var saveMessage by remember { mutableStateOf<String?>(null) }
@@ -184,20 +182,21 @@ fun ProfileScreen(
             userEmail = user.email
             photoUrl = user.photoUrl
             coverPhotoUrl = user.coverPhotoUrl
-            profileVisitorsCount = user.profileVisitorsCount
             profilePictures = (listOf(user.photoUrl) + user.profilePictures).filter { it.isNotBlank() }.distinct()
             coverPictures = (listOf(user.coverPhotoUrl) + user.coverPictures).filter { it.isNotBlank() }.distinct()
+            savedStories = user.stories.filter { it.isNotBlank() }.distinct()
         } else {
             displayName = "Talky User"
             username = "user"
         }
     }
 
-    val displayedGalleryImages = remember(profilePictures, coverPictures, selectedGalleryFolder) {
+    val displayedGalleryImages = remember(profilePictures, coverPictures, savedStories, selectedGalleryFolder) {
         when (selectedGalleryFolder) {
             "profile" -> profilePictures
             "cover" -> coverPictures
-            else -> (profilePictures + coverPictures).distinct()
+            "stories" -> savedStories
+            else -> (profilePictures + coverPictures + savedStories).distinct()
         }
     }
 
@@ -305,45 +304,34 @@ fun ProfileScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(10.dp))
+
                 Text(
-                    text = "Tap avatar to change profile photo",
+                    text = displayName,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 22.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+
+                if (username.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "@$username",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = "Tap avatar or cover to change photos",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.primary
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
-
-                OutlinedTextField(
-                    value = displayName,
-                    onValueChange = { displayName = it; saveMessage = null },
-                    label = { Text("Display Name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                OutlinedTextField(
-                    value = username,
-                    onValueChange = { username = it; saveMessage = null },
-                    label = { Text("Username") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                OutlinedTextField(
-                    value = userEmail,
-                    onValueChange = {},
-                    label = { Text("Email Address") },
-                    readOnly = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
                 if (saveMessage != null) {
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = saveMessage!!,
                         color = MaterialTheme.colorScheme.primary,
@@ -351,71 +339,18 @@ fun ProfileScreen(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Button(
-                    onClick = {
-                        val newName = displayName.trim()
-                        val newUsername = username.trim().removePrefix("@")
-                        if (currentUserId.isNotBlank() && newName.isNotBlank()) {
-                            scope.launch {
-                                isSaving = true
-                                try {
-                                    val userRef = firestore.collection("users").document(currentUserId)
-                                    val userData = mapOf(
-                                        "uid" to currentUserId,
-                                        "displayName" to newName,
-                                        "username" to newUsername,
-                                        "email" to userEmail,
-                                        "photoUrl" to photoUrl,
-                                        "coverPhotoUrl" to coverPhotoUrl
-                                    )
-                                    userRef.set(userData, SetOptions.merge()).await()
-
-                                    val convQuery = firestore.collection("conversations")
-                                        .whereArrayContains("participantIds", currentUserId)
-                                        .get()
-                                        .await()
-
-                                    if (!convQuery.isEmpty) {
-                                        val batch = firestore.batch()
-                                        for (doc in convQuery.documents) {
-                                            batch.update(doc.reference, "participantNames.$currentUserId", newName)
-                                        }
-                                        batch.commit().await()
-                                    }
-
-                                    username = newUsername
-                                    saveMessage = "Profile updated successfully!"
-                                } catch (e: Exception) {
-                                    saveMessage = "Failed to update: ${e.localizedMessage}"
-                                } finally {
-                                    isSaving = false
-                                }
-                            }
-                        }
-                    },
-                    enabled = !isSaving,
-                    modifier = Modifier.fillMaxWidth().height(48.dp)
-                ) {
-                    if (isSaving) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
-                    } else {
-                        Text("Save Changes", fontSize = 16.sp)
-                    }
-                }
-
                 Spacer(modifier = Modifier.height(20.dp))
 
                 // Profile Gallery Folder Tabs
                 ScrollableTabRow(
-                    selectedTabIndex = when(selectedGalleryFolder) { "profile" -> 1; "cover" -> 2; else -> 0 },
+                    selectedTabIndex = when(selectedGalleryFolder) { "profile" -> 1; "cover" -> 2; "stories" -> 3; else -> 0 },
                     edgePadding = 0.dp,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Tab(selected = selectedGalleryFolder == "all", onClick = { selectedGalleryFolder = "all" }, text = { Text("🖼️ All (${(profilePictures + coverPictures).distinct().size})") })
+                    Tab(selected = selectedGalleryFolder == "all", onClick = { selectedGalleryFolder = "all" }, text = { Text("🖼️ All (${(profilePictures + coverPictures + savedStories).distinct().size})") })
                     Tab(selected = selectedGalleryFolder == "profile", onClick = { selectedGalleryFolder = "profile" }, text = { Text("👤 Profile (${profilePictures.size})") })
                     Tab(selected = selectedGalleryFolder == "cover", onClick = { selectedGalleryFolder = "cover" }, text = { Text("🌅 Cover (${coverPictures.size})") })
+                    Tab(selected = selectedGalleryFolder == "stories", onClick = { selectedGalleryFolder = "stories" }, text = { Text("📖 Stories (${savedStories.size})") })
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -459,121 +394,88 @@ fun ProfileScreen(
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
-            }
 
-            if (displayedGalleryImages.isEmpty()) {
-                item {
+                if (displayedGalleryImages.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(120.dp),
+                            .padding(24.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = "No pictures in this folder yet.",
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Text("No photos in this folder yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                }
-            } else {
-                if (isGridView) {
-                    val rows = displayedGalleryImages.chunked(3)
-                    items(rows) { rowImages ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            for (imgUrl in rowImages) {
-                                val isSelected = (imgUrl == photoUrl)
-                                val originalIndex = displayedGalleryImages.indexOf(imgUrl)
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .aspectRatio(1f)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .clickable { fullScreenImageIndex = originalIndex },
-                                    contentAlignment = Alignment.TopEnd
-                                ) {
-                                    AsyncImage(
-                                        model = imgUrl,
-                                        contentDescription = "Gallery Image",
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Crop
-                                    )
-                                    if (isSelected) {
-                                        Surface(
-                                            modifier = Modifier.padding(4.dp),
-                                            shape = CircleShape,
-                                            color = MaterialTheme.colorScheme.primary
-                                        ) {
-                                            Text(
-                                                text = "✓",
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                                color = MaterialTheme.colorScheme.onPrimary,
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
+                } else if (isGridView) {
+                    val chunked = displayedGalleryImages.chunked(2)
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        chunked.forEach { rowImages ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                rowImages.forEach { imgUrl ->
+                                    val indexInAll = displayedGalleryImages.indexOf(imgUrl)
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .aspectRatio(1f)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .clickable { fullScreenImageIndex = indexInAll }
+                                    ) {
+                                        AsyncImage(
+                                            model = imgUrl,
+                                            contentDescription = "Gallery Photo",
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                        if (imgUrl == photoUrl) {
+                                            Surface(
+                                                modifier = Modifier
+                                                    .align(Alignment.TopEnd)
+                                                    .padding(6.dp)
+                                                    .size(24.dp)
+                                                    .clip(CircleShape),
+                                                color = MaterialTheme.colorScheme.primary
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Text("✓", color = MaterialTheme.colorScheme.onPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
                                         }
                                     }
                                 }
-                            }
-                            repeat(3 - rowImages.size) {
-                                Spacer(modifier = Modifier.weight(1f))
+                                if (rowImages.size == 1) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
                             }
                         }
                     }
                 } else {
-                    items(displayedGalleryImages) { imgUrl ->
-                        val isSelected = (imgUrl == photoUrl)
-                        val originalIndex = displayedGalleryImages.indexOf(imgUrl)
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 6.dp)
-                                .clickable { fullScreenImageIndex = originalIndex },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
-                            )
-                        ) {
-                            Row(
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        displayedGalleryImages.forEachIndexed { index, imgUrl ->
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                    .height(180.dp)
+                                    .clickable { fullScreenImageIndex = index }
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
+                                Box {
                                     AsyncImage(
                                         model = imgUrl,
-                                        contentDescription = "Gallery Image",
-                                        modifier = Modifier
-                                            .size(60.dp)
-                                            .clip(RoundedCornerShape(8.dp)),
+                                        contentDescription = "Gallery Photo",
+                                        modifier = Modifier.fillMaxSize(),
                                         contentScale = ContentScale.Crop
                                     )
-                                    Column {
-                                        Text(
-                                            text = if (isSelected) "Current Profile Picture" else "Uploaded Picture",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 14.sp
-                                        )
-                                        Text(
-                                            text = "Tap to view full screen",
-                                            fontSize = 12.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                                if (isSelected) {
-                                    Badge {
-                                        Text("Active")
+                                    if (imgUrl == photoUrl) {
+                                        Surface(
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .padding(8.dp)
+                                                .clip(RoundedCornerShape(8.dp)),
+                                            color = MaterialTheme.colorScheme.primary
+                                        ) {
+                                            Text("Active Profile Photo", color = MaterialTheme.colorScheme.onPrimary, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                                        }
                                     }
                                 }
                             }
@@ -584,35 +486,37 @@ fun ProfileScreen(
         }
     }
 
+    // Full Screen Image View Dialog
     if (fullScreenImageIndex != null && displayedGalleryImages.isNotEmpty()) {
-        val pagerState = rememberPagerState(initialPage = fullScreenImageIndex!!) { displayedGalleryImages.size }
+        val pagerState = rememberPagerState(initialPage = fullScreenImageIndex!!.coerceIn(0, displayedGalleryImages.size - 1)) { displayedGalleryImages.size }
         Dialog(
             onDismissRequest = { fullScreenImageIndex = null },
             properties = DialogProperties(usePlatformDefaultWidth = false)
         ) {
             Surface(
                 modifier = Modifier.fillMaxSize(),
-                color = MaterialTheme.colorScheme.background
+                color = Color.Black
             ) {
                 Box(modifier = Modifier.fillMaxSize()) {
                     HorizontalPager(
                         state = pagerState,
                         modifier = Modifier.fillMaxSize()
                     ) { pageIndex ->
-                        val imgUrl = displayedGalleryImages[pageIndex]
+                        val imgUrl = displayedGalleryImages.getOrNull(pageIndex) ?: ""
                         Box(
                             modifier = Modifier.fillMaxSize(),
                             contentAlignment = Alignment.Center
                         ) {
                             AsyncImage(
                                 model = imgUrl,
-                                contentDescription = "Fullscreen Profile Picture",
+                                contentDescription = "Full Screen Photo",
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Fit
                             )
                         }
                     }
 
+                    // Top Bar (Close & Set as Profile)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -621,33 +525,23 @@ fun ProfileScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        IconButton(onClick = { fullScreenImageIndex = null }) {
-                            Icon(Icons.Default.Close, contentDescription = "Close", tint = MaterialTheme.colorScheme.onBackground)
+                        IconButton(
+                            onClick = { fullScreenImageIndex = null },
+                            modifier = Modifier.background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
                         }
 
-                        val currentImageUrl = displayedGalleryImages[pagerState.currentPage]
-                        val isActive = (currentImageUrl == photoUrl)
-                        if (isActive) {
-                            Surface(
-                                shape = RoundedCornerShape(16.dp),
-                                color = MaterialTheme.colorScheme.primary
-                            ) {
-                                Text(
-                                    text = "Active Profile",
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                    color = MaterialTheme.colorScheme.onPrimary,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp
-                                )
-                            }
-                        } else {
+                        val currentSelectedUrl = displayedGalleryImages.getOrNull(pagerState.currentPage) ?: ""
+                        if (currentSelectedUrl.isNotBlank() && currentSelectedUrl != photoUrl) {
                             Button(
                                 onClick = {
-                                    setAsCurrentProfile(currentImageUrl)
+                                    setAsCurrentProfile(currentSelectedUrl)
+                                    fullScreenImageIndex = null
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                             ) {
-                                Text("Set as Active Profile")
+                                Text("Set as Profile Photo")
                             }
                         }
                     }

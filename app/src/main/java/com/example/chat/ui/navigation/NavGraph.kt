@@ -26,6 +26,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import coil.compose.AsyncImage
+import com.example.chat.data.model.Message
 import com.example.chat.ui.auth.AuthViewModel
 import com.example.chat.ui.auth.LoginScreen
 import com.example.chat.ui.auth.RegisterScreen
@@ -202,6 +203,34 @@ fun ChatNavGraph() {
                                         "timestamp" to System.currentTimeMillis()
                                     )
                                     callRef.set(callData).await()
+
+                                    val msgRef = firestore.collection("conversations")
+                                        .document(conversationId)
+                                        .collection("messages")
+                                        .document()
+
+                                    val callMsgText = if (callType == "video") "Video call" else "Audio call"
+                                    val msg = Message(
+                                        messageId = msgRef.id,
+                                        conversationId = conversationId,
+                                        senderId = myId,
+                                        text = callMsgText,
+                                        messageType = if (callType == "video") "call_video" else "call_audio",
+                                        attachmentUrl = callType,
+                                        createdAt = System.currentTimeMillis()
+                                    )
+                                    msgRef.set(msg).await()
+
+                                    firestore.collection("conversations")
+                                        .document(conversationId)
+                                        .update(
+                                            mapOf(
+                                                "lastMessage" to callMsgText,
+                                                "lastMessageAt" to System.currentTimeMillis(),
+                                                "lastMessageSenderId" to myId,
+                                                "updatedAt" to System.currentTimeMillis()
+                                            )
+                                        ).await()
                                 }
                             } catch (_: Exception) {}
 
