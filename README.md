@@ -42,6 +42,13 @@ To connect Chatly to your own Firebase backend, follow these steps:
 6. **Deploy Firestore Security Rules**:
    - Deploy the provided `firestore.rules` file in your Firebase Console under Firestore -> Rules.
 
+7. **Enable and deploy phone notifications**:
+   - Enable Firebase Cloud Messaging for the project and allow notifications on the Android device.
+   - Firebase Cloud Functions deployment requires the project to use the Blaze billing plan.
+   - Install Node.js 22 and the Firebase CLI, then sign in and select the Firebase project with `firebase use <project-id>`.
+   - From the project root, run `cd functions`, `npm install`, then return to the project root and run `firebase deploy --only functions,firestore:rules`.
+   - The Cloud Function sends all in-app notification types to the recipient's registered devices. Android displays them using the system's default notification sound.
+
 ---
 
 ## Building and Running

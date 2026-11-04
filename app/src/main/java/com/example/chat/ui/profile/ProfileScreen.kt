@@ -1,6 +1,7 @@
 package com.example.chat.ui.profile
 
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -30,6 +31,7 @@ import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.example.chat.core.utils.CloudinaryUploader
 import com.example.chat.data.repository.AuthRepository
+import com.example.chat.ui.chats.ChatListViewModel
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
@@ -38,7 +40,9 @@ import kotlinx.coroutines.tasks.await
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(
-    onNavBack: () -> Unit
+    viewModel: ChatListViewModel,
+    onNavBack: () -> Unit,
+    onNavToChat: (conversationId: String, recipientId: String, recipientName: String) -> Unit
 ) {
     val context = LocalContext.current
     val authRepository = remember { AuthRepository() }
@@ -53,9 +57,7 @@ fun ProfileScreen(
     var coverPhotoUrl by remember { mutableStateOf("") }
     var profilePictures by remember { mutableStateOf<List<String>>(emptyList()) }
     var coverPictures by remember { mutableStateOf<List<String>>(emptyList()) }
-    var savedStories by remember { mutableStateOf<List<String>>(emptyList()) }
-
-    var selectedGalleryFolder by remember { mutableStateOf("all") } // "all", "profile", "cover", "stories"
+    var selectedGalleryFolder by remember { mutableStateOf("all") }
     var isGridView by remember { mutableStateOf(true) }
     var isSaving by remember { mutableStateOf(false) }
     var saveMessage by remember { mutableStateOf<String?>(null) }
@@ -184,19 +186,17 @@ fun ProfileScreen(
             coverPhotoUrl = user.coverPhotoUrl
             profilePictures = (listOf(user.photoUrl) + user.profilePictures).filter { it.isNotBlank() }.distinct()
             coverPictures = (listOf(user.coverPhotoUrl) + user.coverPictures).filter { it.isNotBlank() }.distinct()
-            savedStories = user.stories.filter { it.isNotBlank() }.distinct()
         } else {
             displayName = "Talky User"
             username = "user"
         }
     }
 
-    val displayedGalleryImages = remember(profilePictures, coverPictures, savedStories, selectedGalleryFolder) {
+    val displayedGalleryImages = remember(profilePictures, coverPictures, selectedGalleryFolder) {
         when (selectedGalleryFolder) {
             "profile" -> profilePictures
             "cover" -> coverPictures
-            "stories" -> savedStories
-            else -> (profilePictures + coverPictures + savedStories).distinct()
+            else -> (profilePictures + coverPictures).distinct()
         }
     }
 
@@ -341,16 +341,30 @@ fun ProfileScreen(
 
                 Spacer(modifier = Modifier.height(20.dp))
 
+                StoryHighlightsRow(
+                    ownerId = currentUserId,
+                    ownerName = displayName,
+                    ownerPhoto = photoUrl,
+                    viewerId = currentUserId,
+                    viewModel = viewModel,
+                    onNavToChat = onNavToChat
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
                 // Profile Gallery Folder Tabs
                 ScrollableTabRow(
-                    selectedTabIndex = when(selectedGalleryFolder) { "profile" -> 1; "cover" -> 2; "stories" -> 3; else -> 0 },
+                    selectedTabIndex = when (selectedGalleryFolder) {
+                        "profile" -> 1
+                        "cover" -> 2
+                        else -> 0
+                    },
                     edgePadding = 0.dp,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Tab(selected = selectedGalleryFolder == "all", onClick = { selectedGalleryFolder = "all" }, text = { Text("🖼️ All (${(profilePictures + coverPictures + savedStories).distinct().size})") })
+                    Tab(selected = selectedGalleryFolder == "all", onClick = { selectedGalleryFolder = "all" }, text = { Text("🖼️ All (${(profilePictures + coverPictures).distinct().size})") })
                     Tab(selected = selectedGalleryFolder == "profile", onClick = { selectedGalleryFolder = "profile" }, text = { Text("👤 Profile (${profilePictures.size})") })
                     Tab(selected = selectedGalleryFolder == "cover", onClick = { selectedGalleryFolder = "cover" }, text = { Text("🌅 Cover (${coverPictures.size})") })
-                    Tab(selected = selectedGalleryFolder == "stories", onClick = { selectedGalleryFolder = "stories" }, text = { Text("📖 Stories (${savedStories.size})") })
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -405,7 +419,7 @@ fun ProfileScreen(
                         Text("No photos in this folder yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 } else if (isGridView) {
-                    val chunked = displayedGalleryImages.chunked(2)
+                    val chunked = displayedGalleryImages.chunked(3)
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         chunked.forEach { rowImages ->
                             Row(
@@ -443,7 +457,7 @@ fun ProfileScreen(
                                         }
                                     }
                                 }
-                                if (rowImages.size == 1) {
+                                repeat(3 - rowImages.size) {
                                     Spacer(modifier = Modifier.weight(1f))
                                 }
                             }

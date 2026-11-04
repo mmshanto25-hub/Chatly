@@ -14,7 +14,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.CallMade
 import androidx.compose.material.icons.automirrored.filled.CallReceived
 import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Videocam
@@ -42,6 +44,7 @@ fun UserSearchScreen(
     onNavToCall: (channelName: String, callType: String) -> Unit = { _, _ -> }
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    var showSortMenu by remember { mutableStateOf(false) }
 
     val pageTitle = when (uiState.selectedTab) {
         0 -> "Contacts"
@@ -71,6 +74,44 @@ fun UserSearchScreen(
                 navigationIcon = {
                     IconButton(onClick = onNavBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    if (uiState.selectedTab == 0 || uiState.selectedTab == 2) {
+                        Box {
+                            IconButton(onClick = { showSortMenu = true }) {
+                                Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Sort users")
+                            }
+                            DropdownMenu(
+                                expanded = showSortMenu,
+                                onDismissRequest = { showSortMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Online activity (recent first)") },
+                                    onClick = {
+                                        viewModel.setUserSortMode(UserSortMode.ONLINE_ACTIVITY)
+                                        showSortMenu = false
+                                    },
+                                    trailingIcon = {
+                                        if (uiState.userSortMode == UserSortMode.ONLINE_ACTIVITY) {
+                                            Icon(Icons.Default.Check, contentDescription = "Selected")
+                                        }
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Name (A-Z)") },
+                                    onClick = {
+                                        viewModel.setUserSortMode(UserSortMode.NAME_A_TO_Z)
+                                        showSortMenu = false
+                                    },
+                                    trailingIcon = {
+                                        if (uiState.userSortMode == UserSortMode.NAME_A_TO_Z) {
+                                            Icon(Icons.Default.Check, contentDescription = "Selected")
+                                        }
+                                    }
+                                )
+                            }
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.primaryContainer)

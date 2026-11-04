@@ -17,16 +17,24 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,11 +55,14 @@ import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.chatly.app.R
 import com.example.chat.data.local.SavedAccountManager
+import com.example.chat.data.model.AppNotification
 import com.example.chat.data.model.Conversation
 import com.example.chat.data.model.Story
+import com.example.chat.data.model.StoryComment
 import com.example.chat.data.model.User
 import com.example.chat.ui.chats.UserStories
 import com.google.firebase.Timestamp
+import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Calendar
@@ -71,8 +82,35 @@ fun ChatListScreen(
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val currentUserId = viewModel.currentUserId
+    val now = System.currentTimeMillis()
+    val storyUserIds = uiState.activeStories.mapTo(HashSet()) { it.userId }
+    val onlineUserIds = uiState.usersMap.values
+        .filter { it.uid != currentUserId && it.isCurrentlyOnline(now) }
+        .mapTo(HashSet()) { it.uid }
+    val onlineUsersWithoutStories = uiState.usersMap.values
+        .filter { it.uid in onlineUserIds && it.uid !in storyUserIds }
+        .sortedWith(
+            compareByDescending<User> { it.lastSeenTimeMillis() }
+                .thenBy { it.displayName.lowercase(Locale.getDefault()) }
+        )
+        .map { user ->
+            UserStories(
+                userId = user.uid,
+                userName = user.displayName.ifBlank { user.username },
+                userPhoto = user.photoUrl,
+                stories = emptyList()
+            )
+        }
+
+    LaunchedEffect(uiState.storyUploadError) {
+        uiState.storyUploadError?.let { message ->
+            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+            viewModel.clearStoryUploadError()
+        }
+    }
 
     var showMenu by remember { mutableStateOf(false) }
+    var showNotifications by remember { mutableStateOf(false) }
     var selectedFilter by remember { mutableStateOf("All") }
     var searchQuery by remember { mutableStateOf("") }
     var isSearching by remember { mutableStateOf(false) }
@@ -93,6 +131,14 @@ fun ChatListScreen(
     var activeViewingAllStories by remember { mutableStateOf<List<UserStories>?>(null) }
     var activeViewingUserIndex by remember { mutableStateOf(0) }
     var activeViewingStoryIndex by remember { mutableStateOf(0) }
+    var openStoryCommentsOnLaunch by remember { mutableStateOf(false) }
+    var notificationCommentId by remember { mutableStateOf("") }
+    var storyForViewers by remember { mutableStateOf<Story?>(null) }
+
+    fun closeNotifications() {
+        showNotifications = false
+        viewModel.markAllNotificationsRead()
+    }
 
     val storyPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -155,6 +201,22 @@ fun ChatListScreen(
                             imageVector = if (isSearching) Icons.Default.Close else Icons.Default.Search,
                             contentDescription = "Search"
                         )
+                    }
+
+                    BadgedBox(
+                        badge = {
+                            val unreadCount = uiState.notifications.count { !it.isRead }
+                            if (unreadCount > 0) {
+                                Badge { Text(if (unreadCount > 99) "99+" else unreadCount.toString()) }
+                            }
+                        }
+                    ) {
+                        IconButton(onClick = {
+                            showNotifications = true
+                            viewModel.markAllNotificationsRead()
+                        }) {
+                            Icon(Icons.Default.Notifications, contentDescription = "Notifications")
+                        }
                     }
 
                     IconButton(onClick = onNavToProfile) {
@@ -241,7 +303,20 @@ fun ChatListScreen(
             StoriesRow(
                 myPhotoUrl = uiState.currentUser?.photoUrl ?: "",
                 myStories = uiState.myStories,
+                myStoryNote = uiState.usersMap[currentUserId]?.storyNote
+                    ?: uiState.currentUser?.storyNote.orEmpty(),
+                myStoryNoteExpiresAt = uiState.usersMap[currentUserId]?.storyNoteExpiresAt
+                    ?: uiState.currentUser?.storyNoteExpiresAt
+                    ?: 0L,
+                users = uiState.usersMap.values.toList(),
                 activeStories = uiState.activeStories,
+                onlineUsersWithoutStories = onlineUsersWithoutStories,
+                onlineUserIds = onlineUserIds,
+                onSaveMyNote = { note ->
+                    viewModel.setStoryNote(note) { message ->
+                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                    }
+                },
                 onAddStoryClick = {
                     storyPickerLauncher.launch(
                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
@@ -345,7 +420,97 @@ fun ChatListScreen(
             allUserStories = activeViewingAllStories!!,
             initialUserIndex = activeViewingUserIndex,
             initialStoryIndex = activeViewingStoryIndex,
-            onDismiss = { activeViewingAllStories = null }
+            viewerId = currentUserId,
+            availableUsers = uiState.usersMap.values.toList(),
+            openCommentsOnStart = openStoryCommentsOnLaunch,
+            focusCommentId = notificationCommentId,
+            onMarkViewed = viewModel::markStoryViewed,
+            onToggleLove = { story ->
+                viewModel.toggleStoryLove(story) { message ->
+                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                }
+            },
+            onAddComment = { story, text, parentCommentId, replyToCommentId, mentionIds, onSuccess ->
+                viewModel.addStoryComment(
+                    story = story,
+                    text = text,
+                    parentCommentId = parentCommentId,
+                    replyToCommentId = replyToCommentId,
+                    mentionIds = mentionIds,
+                    onSuccess = onSuccess,
+                    onError = { message ->
+                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                    }
+                )
+            },
+            onToggleCommentLove = { storyId, comment ->
+                viewModel.toggleCommentLove(storyId, comment) { message ->
+                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                }
+            },
+            onSendMessage = { story, text ->
+                viewModel.sendStoryMessage(
+                    story = story,
+                    text = text,
+                    onConversationReady = { conversationId ->
+                        activeViewingAllStories = null
+                        onNavToChat(conversationId, story.userId, story.userName)
+                    },
+                    onError = { message ->
+                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                    }
+                )
+            },
+            onOpenInsights = { story -> storyForViewers = story },
+            onDismiss = {
+                activeViewingAllStories = null
+                openStoryCommentsOnLaunch = false
+                notificationCommentId = ""
+            }
+        )
+    }
+
+    storyForViewers?.let { story ->
+        StoryViewersBottomSheet(
+            story = story,
+            users = uiState.usersMap,
+            onDismiss = { storyForViewers = null }
+        )
+    }
+
+    if (showNotifications) {
+        NotificationsDialog(
+            notifications = uiState.notifications,
+            error = uiState.notificationError,
+            onDismiss = ::closeNotifications,
+            onOpenNotification = { notification ->
+                when {
+                    notification.storyId.isNotBlank() -> {
+                        viewModel.loadStoryForNotification(
+                            notification = notification,
+                            onLoaded = { storyGroup ->
+                                closeNotifications()
+                                activeViewingAllStories = listOf(storyGroup)
+                                activeViewingUserIndex = 0
+                                activeViewingStoryIndex = 0
+                                openStoryCommentsOnLaunch = true
+                                notificationCommentId = notification.commentId
+                            },
+                            onError = { message ->
+                                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                            }
+                        )
+                    }
+                    notification.conversationId.isNotBlank() -> {
+                        closeNotifications()
+                        onNavToChat(
+                            notification.conversationId,
+                            notification.actorId,
+                            notification.actorName
+                        )
+                    }
+                }
+            }
         )
     }
 
@@ -573,582 +738,6 @@ fun ChatListScreen(
                         Text("Cancel")
                     }
                 }
-            )
-        }
-    }
-}
-
-@Composable
-fun StoriesRow(
-    myPhotoUrl: String,
-    myStories: List<Story>,
-    activeStories: List<UserStories>,
-    onAddStoryClick: () -> Unit,
-    onStoryClick: (userIndex: Int, storyIndex: Int) -> Unit
-) {
-    LazyRow(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 10.dp, horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // "My Story" Item with + badge
-        item {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.clickable {
-                    if (myStories.isNotEmpty()) {
-                        onStoryClick(0, 0)
-                    } else {
-                        onAddStoryClick()
-                    }
-                }
-            ) {
-                Box(contentAlignment = Alignment.BottomEnd) {
-                    Surface(
-                        modifier = Modifier
-                            .size(56.dp)
-                            .clip(CircleShape),
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        border = if (myStories.isNotEmpty()) BorderStroke(2.5.dp, Brush.linearGradient(listOf(Color(0xFF22C55E), Color(0xFF0284C7)))) else null
-                    ) {
-                        if (myPhotoUrl.isNotBlank()) {
-                            AsyncImage(
-                                model = myPhotoUrl,
-                                contentDescription = "My Story",
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
-                        } else {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text("👤", fontSize = 24.sp)
-                            }
-                        }
-                    }
-
-                    Surface(
-                        modifier = Modifier
-                            .size(20.dp)
-                            .clip(CircleShape)
-                            .clickable { onAddStoryClick() },
-                        color = MaterialTheme.colorScheme.primary
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = "Add Story",
-                                tint = MaterialTheme.colorScheme.onPrimary,
-                                modifier = Modifier.size(14.dp)
-                            )
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "My Story",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            }
-        }
-
-        // Active Stories from Other Users
-        items(activeStories.size) { index ->
-            val userStory = activeStories[index]
-            val userIndex = if (myStories.isNotEmpty()) index + 1 else index
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.clickable { onStoryClick(userIndex, 0) }
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(60.dp)
-                        .clip(CircleShape)
-                        .border(
-                            BorderStroke(
-                                2.5.dp,
-                                Brush.linearGradient(
-                                    colors = listOf(
-                                        Color(0xFF22C55E),
-                                        Color(0xFF0284C7),
-                                        Color(0xFF3B82F6)
-                                    )
-                                )
-                            ),
-                            CircleShape
-                        )
-                        .padding(3.dp)
-                ) {
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(CircleShape),
-                        color = MaterialTheme.colorScheme.primaryContainer
-                    ) {
-                        if (userStory.userPhoto.isNotBlank()) {
-                            AsyncImage(
-                                model = userStory.userPhoto,
-                                contentDescription = userStory.userName,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
-                        } else {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = userStory.userName.take(1).uppercase(Locale.getDefault()),
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 18.sp
-                                )
-                            }
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = userStory.userName.substringBefore(" "),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun FullStoryViewerDialog(
-    allUserStories: List<UserStories>,
-    initialUserIndex: Int = 0,
-    initialStoryIndex: Int = 0,
-    onDismiss: () -> Unit
-) {
-    if (allUserStories.isEmpty()) return
-    var currentUserIndex by remember { mutableStateOf(initialUserIndex.coerceIn(0, allUserStories.size - 1)) }
-    val currentUserStories = allUserStories.getOrNull(currentUserIndex) ?: allUserStories.first()
-
-    var currentStoryIndex by remember { mutableStateOf(initialStoryIndex.coerceIn(0, currentUserStories.stories.size - 1)) }
-    val currentStory = currentUserStories.stories.getOrNull(currentStoryIndex) ?: currentUserStories.stories.first()
-
-    LaunchedEffect(currentUserIndex, currentStoryIndex) {
-        delay(5000)
-        if (currentStoryIndex < currentUserStories.stories.size - 1) {
-            currentStoryIndex++
-        } else {
-            if (currentUserIndex < allUserStories.size - 1) {
-                currentUserIndex++
-                currentStoryIndex = 0
-            } else {
-                onDismiss()
-            }
-        }
-    }
-
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = Color.Black
-        ) {
-            Box(modifier = Modifier.fillMaxSize()) {
-                val isVideo = currentStory.mediaType.equals("video", ignoreCase = true) ||
-                        currentStory.mediaUrl.lowercase().contains(".mp4") ||
-                        currentStory.mediaUrl.lowercase().contains("video") ||
-                        currentStory.mediaUrl.lowercase().contains("mov") ||
-                        currentStory.mediaUrl.lowercase().contains("webm")
-
-                if (isVideo) {
-                    AndroidView(
-                        factory = { ctx ->
-                            android.widget.VideoView(ctx).apply {
-                                setVideoURI(Uri.parse(currentStory.mediaUrl))
-                                setOnPreparedListener { mp ->
-                                    mp.isLooping = true
-                                    start()
-                                }
-                            }
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } else {
-                    AsyncImage(
-                        model = currentStory.mediaUrl,
-                        contentDescription = "Story Media",
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Fit
-                    )
-                }
-
-                // Left/Right Touch navigation
-                Row(modifier = Modifier.fillMaxSize()) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .clickable {
-                                if (currentStoryIndex > 0) {
-                                    currentStoryIndex--
-                                } else if (currentUserIndex > 0) {
-                                    currentUserIndex--
-                                    currentStoryIndex = allUserStories[currentUserIndex].stories.size - 1
-                                }
-                            }
-                    )
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .clickable {
-                                if (currentStoryIndex < currentUserStories.stories.size - 1) {
-                                    currentStoryIndex++
-                                } else if (currentUserIndex < allUserStories.size - 1) {
-                                    currentUserIndex++
-                                    currentStoryIndex = 0
-                                } else {
-                                    onDismiss()
-                                }
-                            }
-                    )
-                }
-
-                // Top Progress Bars & User Info (Rendered above touch layer so close button gets clicks)
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
-                        .align(Alignment.TopCenter)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        currentUserStories.stories.forEachIndexed { index, _ ->
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(3.dp)
-                                    .clip(RoundedCornerShape(2.dp))
-                                    .background(if (index <= currentStoryIndex) Color.White else Color.White.copy(alpha = 0.3f))
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Surface(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape),
-                                color = MaterialTheme.colorScheme.primaryContainer
-                            ) {
-                                if (currentUserStories.userPhoto.isNotBlank()) {
-                                    AsyncImage(
-                                        model = currentUserStories.userPhoto,
-                                        contentDescription = null,
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Crop
-                                    )
-                                } else {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Text(currentUserStories.userName.take(1).uppercase(Locale.getDefault()), fontWeight = FontWeight.Bold, color = Color.White)
-                                    }
-                                }
-                            }
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = currentUserStories.userName,
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 15.sp
-                            )
-                        }
-
-                        IconButton(onClick = onDismiss) {
-                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
-                        }
-                    }
-                }
-
-                if (currentStory.caption.isNotBlank()) {
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .align(Alignment.BottomCenter)
-                            .padding(24.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        color = Color.Black.copy(alpha = 0.6f)
-                    ) {
-                        Text(
-                            text = currentStory.caption,
-                            color = Color.White,
-                            fontSize = 15.sp,
-                            modifier = Modifier.padding(12.dp)
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-fun ConversationItem(
-    conversation: Conversation,
-    recipientId: String,
-    recipientName: String,
-    currentUserId: String,
-    recipientUser: User?,
-    onClick: () -> Unit,
-    onLongClick: () -> Unit
-) {
-    val formattedTime = remember(conversation.lastMessageAt) {
-        val calendar = Calendar.getInstance().apply { timeInMillis = conversation.lastMessageAt }
-        val now = Calendar.getInstance()
-        if (calendar.get(Calendar.DAY_OF_YEAR) == now.get(Calendar.DAY_OF_YEAR) &&
-            calendar.get(Calendar.YEAR) == now.get(Calendar.YEAR)) {
-            DateFormat.format("HH:mm", calendar).toString()
-        } else {
-            DateFormat.format("MMM dd", calendar).toString()
-        }
-    }
-
-    val photoUrl = if (conversation.type == "group") {
-        conversation.groupPhoto.ifBlank { conversation.participantPhotos["groupPhoto"] ?: "" }
-    } else {
-        conversation.participantPhotos[recipientId] ?: ""
-    }
-    val isPinned = conversation.isPinnedFor(currentUserId)
-    val isMuted = conversation.isMutedFor(currentUserId)
-
-    val timeMs = when (recipientUser?.lastSeenAt) {
-        is Timestamp -> recipientUser.lastSeenAt.toDate().time
-        is java.util.Date -> recipientUser.lastSeenAt.time
-        is Number -> recipientUser.lastSeenAt.toLong()
-        else -> 0L
-    }
-    val isRecentlyActive = timeMs > 0L && (System.currentTimeMillis() - timeMs < 90_000L)
-    val isOnline = (recipientUser?.isOnline == true) || isRecentlyActive
-
-    val unreadCount = conversation.getUnreadCount(currentUserId)
-    val hasUnread = unreadCount > 0 && conversation.lastMessageSenderId != currentUserId
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongClick
-            )
-            .padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(contentAlignment = Alignment.BottomEnd) {
-            Surface(
-                modifier = Modifier
-                    .size(50.dp)
-                    .clip(CircleShape),
-                color = MaterialTheme.colorScheme.primaryContainer
-            ) {
-                if (photoUrl.isNotBlank()) {
-                    AsyncImage(
-                        model = photoUrl,
-                        contentDescription = "Profile Picture",
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                } else if (conversation.type == "group") {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            text = "👥",
-                            fontSize = 22.sp
-                        )
-                    }
-                } else {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            text = recipientName.take(1).uppercase(Locale.getDefault()),
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 20.sp,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    }
-                }
-            }
-
-            if (conversation.type != "group" && recipientId.isNotBlank()) {
-                val shortText = if (isOnline) "" else formatShortLastSeen(recipientUser?.lastSeenAt)
-                if (isOnline) {
-                    Box(
-                        modifier = Modifier
-                            .size(13.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF22C55E))
-                            .border(BorderStroke(2.dp, MaterialTheme.colorScheme.surface), CircleShape)
-                    )
-                } else if (shortText.isNotBlank()) {
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = Color(0xFFF0FDF4),
-                        border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.surface)
-                    ) {
-                        Text(
-                            text = shortText,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF166534),
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.width(16.dp))
-
-        Column(
-            modifier = Modifier.weight(1.8f)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = recipientName,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false)
-                )
-                if (isPinned) {
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("📌", fontSize = 12.sp)
-                }
-                if (isMuted) {
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(text = "🔕", fontSize = 12.sp)
-                }
-            }
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = conversation.lastMessage.ifBlank { "Started a conversation" },
-                fontSize = 14.sp,
-                fontWeight = if (hasUnread) FontWeight.Bold else FontWeight.Normal,
-                color = if (hasUnread) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-
-        Column(
-            modifier = Modifier.weight(0.8f),
-            horizontalAlignment = Alignment.End
-        ) {
-            Text(
-                text = formattedTime,
-                fontSize = 12.sp,
-                fontWeight = if (hasUnread) FontWeight.Bold else FontWeight.Normal,
-                color = if (hasUnread) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            if (hasUnread) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary
-                ) {
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = if (unreadCount > 99) "99+" else unreadCount.toString(),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-fun formatShortLastSeen(timestamp: Any?): String {
-    val date = when (timestamp) {
-        is Timestamp -> timestamp.toDate()
-        is java.util.Date -> timestamp
-        is Number -> java.util.Date(timestamp.toLong())
-        else -> null
-    }
-    if (date == null) return ""
-
-    val timeMs = date.time
-    val now = System.currentTimeMillis()
-    val diff = now - timeMs
-    if (diff < 0L) return "now"
-
-    val seconds = diff / 1000
-    val minutes = seconds / 60
-    val hours = minutes / 60
-    val days = hours / 24
-
-    return when {
-        minutes < 1 -> "now"
-        minutes < 60 -> "${minutes}m"
-        hours < 24 -> "${hours}h"
-        days < 7 -> "${days}d"
-        else -> {
-            val sdf = java.text.SimpleDateFormat("d/M", Locale.getDefault())
-            sdf.format(date)
-        }
-    }
-}
-
-@Composable
-fun MessageStatusTicks(
-    status: String,
-    modifier: Modifier = Modifier,
-    size: Dp = 14.dp
-) {
-    val normalizedStatus = status.lowercase(Locale.getDefault())
-    when (normalizedStatus) {
-        "seen", "read" -> {
-            Text(
-                text = "✓✓",
-                fontSize = (size.value * 0.9).sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF0284C7),
-                modifier = modifier
-            )
-        }
-        "delivered" -> {
-            Text(
-                text = "✓✓",
-                fontSize = (size.value * 0.9).sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                modifier = modifier
-            )
-        }
-        else -> {
-            Text(
-                text = "✓",
-                fontSize = (size.value * 0.9).sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                modifier = modifier
             )
         }
     }
