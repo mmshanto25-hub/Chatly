@@ -123,6 +123,7 @@ fun GroupDetailsDialog(
                         isUploadingGroupPhoto = false
                     }
                 }
+
             }
         }
 
@@ -136,90 +137,135 @@ fun GroupDetailsDialog(
             ) {
                 Scaffold(
                     topBar = {
-                        TopAppBar(
-                            title = { Text(displayName, fontWeight = FontWeight.Bold) },
-                            navigationIcon = {
-                                IconButton(onClick = { onDismiss() }) {
-                                    Icon(Icons.Default.Close, contentDescription = "Close")
-                                }
-                            },
-                            colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
-                        )
+                        if (selectedTab != 1) {
+                            TopAppBar(
+                                title = { Text(displayName, fontWeight = FontWeight.Bold) },
+                                navigationIcon = {
+                                    IconButton(onClick = { onDismiss() }) {
+                                        Icon(Icons.Default.Close, contentDescription = "Close")
+                                    }
+                                },
+                                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
+                            )
+                        }
                     }
                 ) { padding ->
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(padding)
-                    ) {
+                    if (selectedTab == 1) {
                         Box(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f))
-                                .padding(16.dp),
-                            contentAlignment = Alignment.Center
+                                .fillMaxSize()
+                                .padding(padding)
                         ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(80.dp)
-                                        .clip(CircleShape)
-                                        .clickable { groupPhotoPicker.launch("image/*") },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Surface(
-                                        modifier = Modifier.fillMaxSize(),
-                                        shape = CircleShape,
-                                        color = MaterialTheme.colorScheme.primaryContainer
-                                    ) {
-                                        val groupPhoto = conversation.groupPhoto.ifBlank { conversation.participantPhotos["groupPhoto"] ?: conversation.participantPhotos.values.firstOrNull { it.isNotBlank() } ?: "" }
-                                        if (groupPhoto.isNotBlank()) {
-                                            AsyncImage(
-                                                model = groupPhoto,
-                                                contentDescription = "Group Photo",
-                                                modifier = Modifier.fillMaxSize(),
-                                                contentScale = ContentScale.Crop
-                                            )
-                                        } else {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                if (isUploadingGroupPhoto) {
-                                                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                                                } else {
-                                                    Text("👥", fontSize = 32.sp)
-                                                }
+                            SharedMediaFolderGallery(
+                                messages = uiState.messages,
+                                onMediaClick = { url, type ->
+                                    if (type == "video") {
+                                        try {
+                                            val intent = Intent(Intent.ACTION_VIEW).apply {
+                                                setDataAndType(Uri.parse(url), "video/*")
+                                                flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
                                             }
+                                            context.startActivity(intent)
+                                        } catch (_: Exception) {
+                                            Toast.makeText(context, "Cannot play video", Toast.LENGTH_SHORT).show()
+                                        }
+                                    } else if (type == "audio") {
+                                        Toast.makeText(context, "Voice message / audio file", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        val idx = allChatImages.indexOf(url).coerceAtLeast(0)
+                                        onOpenImageGallery(Pair(allChatImages, idx))
+                                    }
+                                },
+                                headerContent = {
+                                    item(key = "group-details-title") {
+                                        TopAppBar(
+                                            title = { Text(displayName, fontWeight = FontWeight.Bold) },
+                                            navigationIcon = {
+                                                IconButton(onClick = onDismiss) {
+                                                    Icon(Icons.Default.Close, contentDescription = "Close")
+                                                }
+                                            },
+                                            colors = TopAppBarDefaults.topAppBarColors(
+                                                containerColor = MaterialTheme.colorScheme.surface
+                                            )
+                                        )
+                                    }
+                                    item(key = "group-details-profile") {
+                                        GroupDetailsProfileHeader(
+                                            groupPhoto = conversation.groupPhoto.ifBlank {
+                                                conversation.participantPhotos["groupPhoto"]
+                                                    ?: conversation.participantPhotos.values.firstOrNull { it.isNotBlank() }
+                                                    ?: ""
+                                            },
+                                            displayName = displayName,
+                                            memberCount = conversation.participantIds.size,
+                                            isUploading = isUploadingGroupPhoto,
+                                            onPhotoClick = { groupPhotoPicker.launch("image/*") },
+                                            onEditName = {
+                                                newGroupNameInput = displayName
+                                                showEditGroupNameDialog = true
+                                            }
+                                        )
+                                    }
+                                    item(key = "group-details-tabs") {
+                                        ScrollableTabRow(
+                                            selectedTabIndex = selectedTab,
+                                            edgePadding = 16.dp
+                                        ) {
+                                            Tab(
+                                                selected = selectedTab == 0,
+                                                onClick = { selectedTab = 0 },
+                                                text = { Text("Members") }
+                                            )
+                                            Tab(
+                                                selected = selectedTab == 1,
+                                                onClick = { selectedTab = 1 },
+                                                text = { Text("Shared Media") }
+                                            )
+                                            Tab(
+                                                selected = selectedTab == 2,
+                                                onClick = { selectedTab = 2 },
+                                                text = { Text("Theme") }
+                                            )
                                         }
                                     }
                                 }
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Text(text = displayName, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                                    IconButton(onClick = {
-                                        newGroupNameInput = displayName
-                                        showEditGroupNameDialog = true
-                                    }) {
-                                        Icon(Icons.Default.Edit, contentDescription = "Edit Group Name", modifier = Modifier.size(18.dp))
-                                    }
-                                }
-                                Text(text = "${conversation.participantIds.size} members", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
+                            )
                         }
-
-                        ScrollableTabRow(
-                            selectedTabIndex = selectedTab,
-                            edgePadding = 16.dp
+                    } else {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(padding)
                         ) {
-                            Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Members") })
-                            Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("Shared Media") })
-                            Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }, text = { Text("Theme") })
-                        }
+                            GroupDetailsProfileHeader(
+                                groupPhoto = conversation.groupPhoto.ifBlank {
+                                    conversation.participantPhotos["groupPhoto"]
+                                        ?: conversation.participantPhotos.values.firstOrNull { it.isNotBlank() }
+                                        ?: ""
+                                },
+                                displayName = displayName,
+                                memberCount = conversation.participantIds.size,
+                                isUploading = isUploadingGroupPhoto,
+                                onPhotoClick = { groupPhotoPicker.launch("image/*") },
+                                onEditName = {
+                                    newGroupNameInput = displayName
+                                    showEditGroupNameDialog = true
+                                }
+                            )
 
-                        Box(modifier = Modifier.fillMaxSize().weight(1f)) {
-                            when (selectedTab) {
-                                0 -> {
+                            ScrollableTabRow(
+                                selectedTabIndex = selectedTab,
+                                edgePadding = 16.dp
+                            ) {
+                                Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Members") })
+                                Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("Shared Media") })
+                                Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }, text = { Text("Theme") })
+                            }
+
+                            Box(modifier = Modifier.fillMaxSize().weight(1f)) {
+                                when (selectedTab) {
+                                    0 -> {
                                     Column(
                                         modifier = Modifier
                                             .fillMaxSize()
@@ -362,6 +408,7 @@ fun GroupDetailsDialog(
                 }
             }
         }
+        }
 
         if (showAddMemberDialog) {
             AlertDialog(
@@ -478,6 +525,76 @@ fun GroupDetailsDialog(
                         Text("Cancel")
                     }
                 }
+            )
+        }
+    }
+}
+
+@Composable
+private fun GroupDetailsProfileHeader(
+    groupPhoto: String,
+    displayName: String,
+    memberCount: Int,
+    isUploading: Boolean,
+    onPhotoClick: () -> Unit,
+    onEditName: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f))
+            .padding(16.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                modifier = Modifier
+                    .size(80.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onPhotoClick),
+                contentAlignment = Alignment.Center
+            ) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    if (groupPhoto.isNotBlank()) {
+                        AsyncImage(
+                            model = groupPhoto,
+                            contentDescription = "Group Photo",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Box(contentAlignment = Alignment.Center) {
+                            if (isUploading) {
+                                CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                            } else {
+                                Text("👥", fontSize = 32.sp)
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(text = displayName, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                IconButton(onClick = onEditName) {
+                    Icon(
+                        Icons.Default.Edit,
+                        contentDescription = "Edit Group Name",
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+            Text(
+                text = "$memberCount members",
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }

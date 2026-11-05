@@ -96,7 +96,6 @@ fun RecipientProfileDialog(
     if (isVisible && recipientId.isNotBlank()) {
         var recipientUser by remember { mutableStateOf<User?>(null) }
         var isLoadingRecipient by remember { mutableStateOf(true) }
-        var isGridView by remember { mutableStateOf(true) }
         var selectedGalleryFolder by remember { mutableStateOf("all") } // "all", "profile", "cover"
 
         LaunchedEffect(recipientId) {
@@ -257,7 +256,8 @@ fun RecipientProfileDialog(
                                     ownerPhoto = u.photoUrl,
                                     viewerId = currentUserId,
                                     viewModel = chatListViewModel,
-                                    onNavToChat = onNavToChat
+                                    onNavToChat = onNavToChat,
+                                    ownerUser = u
                                 )
 
                                 // Folder Tabs
@@ -273,45 +273,6 @@ fun RecipientProfileDialog(
 
                                 Spacer(modifier = Modifier.height(12.dp))
 
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "Gallery (${displayedPics.size})",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 15.sp
-                                    )
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Button(
-                                            onClick = { isGridView = true },
-                                            colors = ButtonDefaults.buttonColors(
-                                                containerColor = if (isGridView) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                                contentColor = if (isGridView) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                                            ),
-                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                                            modifier = Modifier.height(32.dp)
-                                        ) {
-                                            Text("Grid", fontSize = 12.sp)
-                                        }
-                                        Button(
-                                            onClick = { isGridView = false },
-                                            colors = ButtonDefaults.buttonColors(
-                                                containerColor = if (!isGridView) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                                contentColor = if (!isGridView) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                                            ),
-                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                                            modifier = Modifier.height(32.dp)
-                                        ) {
-                                            Text("List", fontSize = 12.sp)
-                                        }
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(12.dp))
                             }
 
                             if (displayedPics.isEmpty()) {
@@ -330,83 +291,37 @@ fun RecipientProfileDialog(
                                     }
                                 }
                             } else {
-                                if (isGridView) {
-                                    val rows = displayedPics.chunked(3)
-                                    items(rows) { rowImages ->
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(vertical = 4.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            for (imgUrl in rowImages) {
-                                                val originalIndex = displayedPics.indexOf(imgUrl)
-                                                Box(
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .aspectRatio(1f)
-                                                        .clip(RoundedCornerShape(8.dp))
-                                                        .clickable {
-                                                            recipientGalleryPics = displayedPics
-                                                            fullScreenGalleryIndex = originalIndex
-                                                        },
-                                                    contentAlignment = Alignment.TopEnd
-                                                ) {
-                                                    AsyncImage(
-                                                        model = imgUrl,
-                                                        contentDescription = "Gallery Image",
-                                                        modifier = Modifier.fillMaxSize(),
-                                                        contentScale = ContentScale.Crop
-                                                    )
-                                                }
-                                            }
-                                            repeat(3 - rowImages.size) {
-                                                Spacer(modifier = Modifier.weight(1f))
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    items(displayedPics) { imgUrl ->
+                                val rows = displayedPics.chunked(3)
+                                items(rows) { rowImages ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 4.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        for (imgUrl in rowImages) {
                                         val originalIndex = displayedPics.indexOf(imgUrl)
-                                        Card(
+                                            Box(
                                             modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(vertical = 6.dp)
-                                                .clickable {
-                                                    recipientGalleryPics = displayedPics
-                                                    fullScreenGalleryIndex = originalIndex
-                                                },
-                                            shape = RoundedCornerShape(12.dp),
-                                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                                        ) {
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(8.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.SpaceBetween
+                                                    .weight(1f)
+                                                    .aspectRatio(1f)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .clickable {
+                                                        recipientGalleryPics = displayedPics
+                                                        fullScreenGalleryIndex = originalIndex
+                                                    },
+                                                contentAlignment = Alignment.TopEnd
                                             ) {
                                                 AsyncImage(
                                                     model = imgUrl,
                                                     contentDescription = "Gallery Image",
-                                                    modifier = Modifier
-                                                        .size(60.dp)
-                                                        .clip(RoundedCornerShape(8.dp)),
+                                                    modifier = Modifier.fillMaxSize(),
                                                     contentScale = ContentScale.Crop
                                                 )
-                                                Column {
-                                                    Text(
-                                                        text = if (imgUrl == u.photoUrl) "Current Profile Picture" else "Uploaded Picture",
-                                                        fontWeight = FontWeight.Bold,
-                                                        fontSize = 14.sp
-                                                    )
-                                                    Text(
-                                                        text = "Tap to view full screen",
-                                                        fontSize = 12.sp,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                    )
-                                                }
                                             }
+                                        }
+                                        repeat(3 - rowImages.size) {
+                                            Spacer(modifier = Modifier.weight(1f))
                                         }
                                     }
                                 }

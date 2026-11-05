@@ -88,8 +88,10 @@ fun ConversationMessageList(
     allChatImages: List<String>,
     context: android.content.Context,
     onReplyToMessage: (com.example.chat.data.model.Message) -> Unit,
+    onReactToMessage: (messageId: String, emoji: String) -> Unit,
     onOpenImageGallery: (Pair<List<String>, Int>) -> Unit,
-    onOpenAlbum: (List<String>) -> Unit
+    onOpenAlbum: (List<String>) -> Unit,
+    onOpenUserProfile: (userId: String, userName: String) -> Unit
 ) {
         val bubbleColorMe = getThemeBubbleColor(themeColor, true)
         val bubbleColorOther = getThemeBubbleColor(themeColor, false)
@@ -120,6 +122,12 @@ fun ConversationMessageList(
                 ) { msg ->
                     val isMe = (msg.senderId == currentUserId)
                     val isSystem = (msg.messageType == "system")
+                    val displayText = if (msg.replyToText.isNotBlank()) {
+                        msg.text.removePrefix("Replied to note:").trimStart()
+                    } else {
+                        msg.text
+                    }
+                    val loveCount = msg.reactions.count { it.value == "❤️" }
 
                     if (isSystem) {
                         Box(
@@ -160,7 +168,10 @@ fun ConversationMessageList(
                                 Surface(
                                     modifier = Modifier
                                         .size(32.dp)
-                                        .clip(CircleShape),
+                                        .clip(CircleShape)
+                                        .clickable {
+                                            onOpenUserProfile(msg.senderId, senderName)
+                                        },
                                     color = MaterialTheme.colorScheme.primaryContainer
                                 ) {
                                     if (senderPhoto.isNotBlank()) {
@@ -197,7 +208,16 @@ fun ConversationMessageList(
                                         },
                                         onMoreClick = {
                                             onOpenAlbum(msg.attachmentUrls)
+                                        },
+                                        onDoubleTap = {
+                                            onReactToMessage(msg.messageId, "❤️")
                                         }
+                                    )
+                                    MessageLoveReaction(
+                                        count = loveCount,
+                                        modifier = Modifier
+                                            .align(Alignment.BottomStart)
+                                            .padding(6.dp)
                                     )
                                     Surface(
                                         modifier = Modifier
@@ -221,9 +241,16 @@ fun ConversationMessageList(
                                         .height(240.dp)
                                         .clip(RoundedCornerShape(16.dp))
                                         .background(Color(0xFF1E222A))
-                                        .clickable {
-                                            val idx = allChatImages.indexOf(msg.attachmentUrl).coerceAtLeast(0)
-                                            onOpenImageGallery(Pair(allChatImages, idx))
+                                        .pointerInput(msg.messageId) {
+                                            detectTapGestures(
+                                                onTap = {
+                                                    val idx = allChatImages.indexOf(msg.attachmentUrl).coerceAtLeast(0)
+                                                    onOpenImageGallery(Pair(allChatImages, idx))
+                                                },
+                                                onDoubleTap = {
+                                                    onReactToMessage(msg.messageId, "❤️")
+                                                }
+                                            )
                                         }
                                 ) {
                                     AsyncImage(
@@ -231,6 +258,12 @@ fun ConversationMessageList(
                                         contentDescription = "Image attachment",
                                         modifier = Modifier.fillMaxSize(),
                                         contentScale = ContentScale.Crop
+                                    )
+                                    MessageLoveReaction(
+                                        count = loveCount,
+                                        modifier = Modifier
+                                            .align(Alignment.BottomStart)
+                                            .padding(6.dp)
                                     )
                                     Surface(
                                         modifier = Modifier
@@ -254,13 +287,20 @@ fun ConversationMessageList(
                                         .height(240.dp)
                                         .clip(RoundedCornerShape(16.dp))
                                         .background(Color(0xFF1E222A))
-                                        .clickable {
-                                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(msg.attachmentUrl)).apply {
-                                                setDataAndType(Uri.parse(msg.attachmentUrl), "video/*")
-                                            }
-                                            try {
-                                                context.startActivity(intent)
-                                            } catch (_: Exception) {}
+                                        .pointerInput(msg.messageId) {
+                                            detectTapGestures(
+                                                onTap = {
+                                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(msg.attachmentUrl)).apply {
+                                                        setDataAndType(Uri.parse(msg.attachmentUrl), "video/*")
+                                                    }
+                                                    try {
+                                                        context.startActivity(intent)
+                                                    } catch (_: Exception) {}
+                                                },
+                                                onDoubleTap = {
+                                                    onReactToMessage(msg.messageId, "❤️")
+                                                }
+                                            )
                                         }
                                 ) {
                                     AsyncImage(
@@ -286,14 +326,27 @@ fun ConversationMessageList(
                                             )
                                         }
                                     }
+                                    MessageLoveReaction(
+                                        count = loveCount,
+                                        modifier = Modifier
+                                            .align(Alignment.BottomStart)
+                                            .padding(6.dp)
+                                    )
                                     // Download button overlay at top-right
                                     Surface(
                                         modifier = Modifier
                                             .align(Alignment.TopEnd)
                                             .padding(6.dp)
                                             .size(32.dp)
-                                            .clickable {
-                                                downloadMedia(context, msg.attachmentUrl, true)
+                                            .pointerInput(msg.messageId) {
+                                                detectTapGestures(
+                                                    onTap = {
+                                                        downloadMedia(context, msg.attachmentUrl, true)
+                                                    },
+                                                    onDoubleTap = {
+                                                        onReactToMessage(msg.messageId, "❤️")
+                                                    }
+                                                )
                                             },
                                         shape = CircleShape,
                                         color = Color.Black.copy(alpha = 0.6f)
@@ -354,7 +407,7 @@ fun ConversationMessageList(
                                             ) {
                                                 Column(modifier = Modifier.padding(6.dp)) {
                                                     Text(
-                                                        text = "↩ ${msg.replyToSenderName} replied",
+                                                        text = "↩ ${msg.replyToSenderName}",
                                                         fontSize = 10.sp,
                                                         fontWeight = FontWeight.Bold,
                                                         color = if (themeColor == "dark") Color(0xFF90CAF9) else MaterialTheme.colorScheme.primary
@@ -375,12 +428,38 @@ fun ConversationMessageList(
                                             Spacer(modifier = Modifier.height(6.dp))
                                         }
 
-                                        if (msg.text.isNotBlank() && msg.messageType == "text") {
-                                            Text(
-                                                text = msg.text,
-                                                fontSize = 15.sp,
-                                                color = if (themeColor == "dark") Color.White else MaterialTheme.colorScheme.onSurface
-                                            )
+                                        if (displayText.isNotBlank() && msg.messageType == "text") {
+                                            Column {
+                                                Text(
+                                                    text = displayText,
+                                                    fontSize = 15.sp,
+                                                    color = if (themeColor == "dark") Color.White else MaterialTheme.colorScheme.onSurface
+                                                )
+                                                if (loveCount > 0) {
+                                                    Spacer(modifier = Modifier.height(4.dp))
+                                                    Surface(
+                                                        shape = CircleShape,
+                                                        color = MaterialTheme.colorScheme.surface,
+                                                        border = BorderStroke(
+                                                            1.dp,
+                                                            MaterialTheme.colorScheme.outlineVariant
+                                                        )
+                                                    ) {
+                                                        Text(
+                                                            text = "❤️${if (loveCount > 1) " $loveCount" else ""}",
+                                                            fontSize = 12.sp,
+                                                            modifier = Modifier.padding(
+                                                                horizontal = 7.dp,
+                                                                vertical = 3.dp
+                                                            )
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        if (msg.messageType != "text") {
+                                            MessageLoveReaction(count = loveCount)
                                         }
 
                                         Spacer(modifier = Modifier.height(4.dp))
@@ -405,13 +484,33 @@ fun ConversationMessageList(
                                                 MessageStatusTicks(status = status, size = 11.dp)
                                             }
                                         }
+
                                     }
                                 }
                             }
                         }
                     }
+
                 }
                 item { Spacer(modifier = Modifier.height(8.dp)) }
             }
         }
+}
+
+@Composable
+private fun MessageLoveReaction(count: Int, modifier: Modifier = Modifier) {
+    if (count > 0) {
+        Surface(
+            modifier = modifier,
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        ) {
+            Text(
+                text = "❤️${if (count > 1) " $count" else ""}",
+                fontSize = 12.sp,
+                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+            )
+        }
+    }
 }

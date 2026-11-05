@@ -25,6 +25,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MoreVert
@@ -83,20 +84,42 @@ fun FullStoryViewerDialog(
     onToggleCommentLove: (String, StoryComment) -> Unit,
     onSendMessage: (Story, String) -> Unit,
     onOpenInsights: (Story) -> Unit,
+    onOpenUserProfile: (userId: String, userName: String) -> Unit = { _, _ -> },
+    onOpenConversation: (Story) -> Unit = {},
+    onDeleteStory: (
+        story: Story,
+        keepInHighlights: Boolean,
+        onSuccess: () -> Unit
+    ) -> Unit = { _, _, onSuccess -> onSuccess() },
     onDismiss: () -> Unit
 ) {
     if (allUserStories.isEmpty()) return
-    var currentUserIndex by remember { mutableStateOf(initialUserIndex.coerceIn(0, allUserStories.size - 1)) }
-    val currentUserStories = allUserStories.getOrNull(currentUserIndex) ?: allUserStories.first()
+    var visibleUserStories by remember { mutableStateOf(allUserStories) }
+    var currentUserIndex by remember {
+        mutableIntStateOf(initialUserIndex.coerceIn(0, allUserStories.size - 1))
+    }
+    val currentUserStories = visibleUserStories.getOrNull(currentUserIndex) ?: visibleUserStories.first()
 
-    var currentStoryIndex by remember { mutableStateOf(initialStoryIndex.coerceIn(0, currentUserStories.stories.size - 1)) }
+    var currentStoryIndex by remember {
+        mutableIntStateOf(initialStoryIndex.coerceIn(0, currentUserStories.stories.lastIndex))
+    }
     val currentStory = currentUserStories.stories.getOrNull(currentStoryIndex) ?: currentUserStories.stories.first()
     var liveStory by remember(currentStory.storyId) { mutableStateOf(currentStory) }
     var messageDraft by remember(currentStory.storyId) { mutableStateOf("") }
     var commentDraft by remember(currentStory.storyId) { mutableStateOf("") }
     var showStoryComments by remember(currentStory.storyId) { mutableStateOf(openCommentsOnStart) }
     var storyComments by remember(currentStory.storyId) { mutableStateOf<List<StoryComment>>(emptyList()) }
+    var showDeleteStoryDialog by remember(currentStory.storyId) { mutableStateOf(false) }
+    var keepStoryInHighlights by remember(currentStory.storyId) { mutableStateOf(false) }
+    var currentTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
     val isOwnStory = currentUserStories.userId == viewerId
+
+    LaunchedEffect(liveStory.storyId) {
+        while (true) {
+            delay(60_000L)
+            currentTime = System.currentTimeMillis()
+        }
+    }
 
     DisposableEffect(currentStory.storyId) {
         val storyRef = FirebaseFirestore.getInstance()
@@ -129,7 +152,7 @@ fun FullStoryViewerDialog(
         if (currentStoryIndex < currentUserStories.stories.size - 1) {
             currentStoryIndex++
         } else {
-            if (currentUserIndex < allUserStories.size - 1) {
+            if (currentUserIndex < visibleUserStories.size - 1) {
                 currentUserIndex++
                 currentStoryIndex = 0
             } else {
@@ -138,8 +161,42 @@ fun FullStoryViewerDialog(
         }
     }
 
-    LaunchedEffect(currentUserIndex, currentStoryIndex, currentStory.storyId, showStoryComments) {
-        if (!showStoryComments && !liveStory.mediaType.equals("video", ignoreCase = true)) {
+    fun removeCurrentStoryAndAdvance() {
+        val orderedStories = visibleUserStories.flatMap { it.stories }
+        val currentIndex = orderedStories.indexOfFirst { it.storyId == liveStory.storyId }
+        val nextStory = orderedStories.getOrNull(currentIndex + 1)
+        val updatedStories = visibleUserStories.mapNotNull { userStories ->
+            val remainingStories = userStories.stories.filterNot { it.storyId == liveStory.storyId }
+            if (remainingStories.isEmpty()) null else userStories.copy(stories = remainingStories)
+        }
+        if (nextStory == null) {
+            onDismiss()
+            return
+        }
+        visibleUserStories = updatedStories
+        val nextUserIndex = updatedStories.indexOfFirst { group ->
+            group.stories.any { it.storyId == nextStory.storyId }
+        }
+        if (nextUserIndex >= 0) {
+            currentUserIndex = nextUserIndex
+            currentStoryIndex = updatedStories[nextUserIndex].stories.indexOfFirst {
+                it.storyId == nextStory.storyId
+            }
+        } else {
+            onDismiss()
+        }
+    }
+
+    LaunchedEffect(
+        currentUserIndex,
+        currentStoryIndex,
+        currentStory.storyId,
+        showStoryComments,
+        showDeleteStoryDialog
+    ) {
+        if (!showStoryComments && !showDeleteStoryDialog &&
+            !liveStory.mediaType.equals("video", ignoreCase = true)
+        ) {
             delay(Story.IMAGE_DISPLAY_DURATION_MS)
             advanceStory()
         }
@@ -252,7 +309,13 @@ fun FullStoryViewerDialog(
                             Surface(
                                 modifier = Modifier
                                     .size(36.dp)
-                                    .clip(CircleShape),
+                                    .clip(CircleShape)
+                                    .clickable {
+                                        onOpenUserProfile(
+                                            currentUserStories.userId,
+                                            currentUserStories.userName
+                                        )
+                                    },
                                 color = MaterialTheme.colorScheme.primaryContainer
                             ) {
                                 if (currentUserStories.userPhoto.isNotBlank()) {
@@ -269,16 +332,58 @@ fun FullStoryViewerDialog(
                                 }
                             }
                             Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = currentUserStories.userName,
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 15.sp
-                            )
+                            Column {
+                                Text(
+                                    text = currentUserStories.userName,
+                                    modifier = Modifier.clickable {
+                                        onOpenUserProfile(
+                                            currentUserStories.userId,
+                                            currentUserStories.userName
+                                        )
+                                    },
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp
+                                )
+                                Text(
+                                    text = storyAgeLabel(liveStory.createdAt, currentTime),
+                                    color = Color.White.copy(alpha = 0.75f),
+                                    fontSize = 11.sp
+                                )
+                            }
                         }
 
-                        IconButton(onClick = onDismiss) {
-                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (!isOwnStory) {
+                                Surface(
+                                    onClick = { onOpenConversation(liveStory) },
+                                    modifier = Modifier.size(36.dp),
+                                    shape = CircleShape,
+                                    color = Color.White.copy(alpha = 0.16f)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.ChatBubbleOutline,
+                                            contentDescription = "Open chat",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(19.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            IconButton(onClick = onDismiss) {
+                                Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                            }
+
+                            if (isOwnStory) {
+                                IconButton(onClick = { showDeleteStoryDialog = true }) {
+                                    Icon(
+                                        imageVector = Icons.Default.DeleteOutline,
+                                        contentDescription = "Delete story",
+                                        tint = Color.White
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -352,7 +457,7 @@ fun FullStoryViewerDialog(
                             Text("${storyComments.size}", color = Color.White)
                         }
                     } else {
-                        storyComments.takeLast(2).forEach { comment ->
+                        storyComments.takeLast(5).forEach { comment ->
                             val senderName = comment.senderName.ifBlank { "User" }
                             val senderPhoto = comment.senderPhoto.ifBlank {
                                 availableUsers.firstOrNull { it.uid == comment.senderId }?.photoUrl.orEmpty()
@@ -367,7 +472,10 @@ fun FullStoryViewerDialog(
                                         .size(32.dp)
                                         .border(1.dp, Color.White.copy(alpha = 0.9f), CircleShape)
                                         .padding(2.dp)
-                                        .clip(CircleShape),
+                                        .clip(CircleShape)
+                                        .clickable {
+                                            onOpenUserProfile(comment.senderId, senderName)
+                                        },
                                     color = Color.White.copy(alpha = 0.2f)
                                 ) {
                                     if (senderPhoto.isNotBlank()) {
@@ -398,6 +506,9 @@ fun FullStoryViewerDialog(
                                 ) {
                                     Text(
                                         text = senderName,
+                                        modifier = Modifier.clickable {
+                                            onOpenUserProfile(comment.senderId, senderName)
+                                        },
                                         color = Color.White.copy(alpha = 0.8f),
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.SemiBold
@@ -460,6 +571,50 @@ fun FullStoryViewerDialog(
         }
     }
 
+    if (showDeleteStoryDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteStoryDialog = false },
+            title = { Text("Delete story?") },
+            text = {
+                Column {
+                    Text("This story will be removed from active stories.")
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                keepStoryInHighlights = !keepStoryInHighlights
+                            }
+                            .padding(top = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = keepStoryInHighlights,
+                            onCheckedChange = { keepStoryInHighlights = it }
+                        )
+                        Text("Keep in profile highlights")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteStoryDialog = false
+                        onDeleteStory(liveStory, keepStoryInHighlights) {
+                            removeCurrentStoryAndAdvance()
+                        }
+                    }
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteStoryDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     if (showStoryComments) {
         StoryCommentsDialog(
             storyId = liveStory.storyId,
@@ -478,7 +633,19 @@ fun FullStoryViewerDialog(
                     }
                 }
             },
+            onOpenUserProfile = onOpenUserProfile,
             onDismiss = { showStoryComments = false }
         )
+    }
+}
+
+private fun storyAgeLabel(createdAt: Long, now: Long): String {
+    val elapsed = (now - createdAt).coerceAtLeast(0L)
+    val minutes = elapsed / 60_000L
+    return when {
+        minutes < 1 -> "Just now"
+        minutes < 60 -> "${minutes}m ago"
+        minutes < 24 * 60 -> "${minutes / 60}h ago"
+        else -> "${minutes / (24 * 60)}d ago"
     }
 }

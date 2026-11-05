@@ -106,6 +106,8 @@ fun ConversationScreen(
     var showThemeDialog by remember { mutableStateOf(false) }
     var showCreateGroupDialog by remember { mutableStateOf(false) }
     var showRecipientProfileDialog by remember { mutableStateOf(false) }
+    var profileRecipientId by remember { mutableStateOf("") }
+    var profileRecipientName by remember { mutableStateOf("") }
     var showGroupDetailsDialog by remember { mutableStateOf(false) }
     var showChatInfoDialog by remember { mutableStateOf(false) }
     var currentUserName by remember { mutableStateOf("User") }
@@ -212,12 +214,7 @@ fun ConversationScreen(
     if (activeAlbumGridUrls != null) {
         AlbumGridDialog(
             urls = activeAlbumGridUrls!!,
-            onDismiss = { activeAlbumGridUrls = null },
-            onImageClick = { idx: Int ->
-                val urls = activeAlbumGridUrls!!
-                activeAlbumGridUrls = null
-                fullScreenImageGallery = Pair(urls, idx)
-            }
+            onDismiss = { activeAlbumGridUrls = null }
         )
     }
     if (fullScreenImageGallery != null) {
@@ -572,8 +569,8 @@ fun ConversationScreen(
 
     RecipientProfileDialog(
         isVisible = showRecipientProfileDialog,
-        recipientId = recipientId,
-        recipientName = recipientName,
+        recipientId = profileRecipientId,
+        recipientName = profileRecipientName,
         currentUserId = currentUserId,
         chatListViewModel = chatListViewModel,
         onNavToChat = onNavToChat,
@@ -596,6 +593,8 @@ fun ConversationScreen(
                             if (conversation?.type == "group") {
                                 showGroupDetailsDialog = true
                             } else if (recipientId.isNotBlank()) {
+                                profileRecipientId = recipientId
+                                profileRecipientName = displayName
                                 showRecipientProfileDialog = true
                             }
                         }
@@ -870,8 +869,16 @@ fun ConversationScreen(
             allChatImages = allChatImages,
             context = context,
             onReplyToMessage = viewModel::setReplyingToMessage,
+            onReactToMessage = viewModel::reactToMessage,
             onOpenImageGallery = { fullScreenImageGallery = it },
-            onOpenAlbum = { activeAlbumGridUrls = it }
+            onOpenAlbum = { activeAlbumGridUrls = it },
+            onOpenUserProfile = { userId, userName ->
+                if (userId.isNotBlank()) {
+                    profileRecipientId = userId
+                    profileRecipientName = userName
+                    showRecipientProfileDialog = true
+                }
+            }
         )
     }
 }

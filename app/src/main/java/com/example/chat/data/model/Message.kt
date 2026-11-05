@@ -13,5 +13,6 @@ data class Message(
     val attachmentUrls: List<String> = emptyList(),
     val replyToMessageId: String = "",
     val replyToText: String = "",
-    val replyToSenderName: String = ""
+    val replyToSenderName: String = "",
+    val reactions: Map<String, String> = emptyMap()
 )

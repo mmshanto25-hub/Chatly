@@ -37,23 +37,9 @@ internal fun sortChatListConversations(
     stories: List<UserStories>,
     currentUserId: String
 ): List<Conversation> {
-    val storyUserIds = stories.mapTo(HashSet()) { it.userId }
-    val now = System.currentTimeMillis()
     return conversations.sortedWith(
         compareByDescending<Conversation> { it.isPinnedFor(currentUserId) }
-            .thenByDescending { conversation ->
-                conversation.type != "group" &&
-                    conversation.participantIds.any { it != currentUserId && it in storyUserIds }
-            }
-            .thenByDescending { conversation ->
-                val recipientId = conversation.participantIds.firstOrNull { it != currentUserId }
-                conversation.type != "group" && isCurrentlyOnline(users[recipientId], now)
-            }
-            .thenByDescending { conversation ->
-                val recipientId = conversation.participantIds.firstOrNull { it != currentUserId }
-                lastSeenTimeMillis(users[recipientId])
-            }
-            .thenByDescending { it.lastMessageAt }
+            .thenByDescending { maxOf(it.lastMessageAt, it.updatedAt) }
     )
 }
 

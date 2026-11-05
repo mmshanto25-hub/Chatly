@@ -231,7 +231,7 @@ class ChatRepository {
 
                     val sortedConvs = validConversations.sortedWith(
                         compareByDescending<Conversation> { it.isPinnedFor(userId) }
-                            .thenByDescending { it.lastMessageAt }
+                            .thenByDescending { maxOf(it.lastMessageAt, it.updatedAt) }
                     )
                     trySend(sortedConvs)
                 }

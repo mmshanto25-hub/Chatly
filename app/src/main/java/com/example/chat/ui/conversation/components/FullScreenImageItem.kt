@@ -2,6 +2,7 @@ package com.example.chat.ui.conversation.components
 
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
@@ -13,6 +14,7 @@ import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 fun FullScreenImageItem(imgUrl: String) {
     var scale by remember(imgUrl) { mutableStateOf(1f) }
     var offset by remember(imgUrl) { mutableStateOf(Offset.Zero) }
@@ -25,7 +27,10 @@ fun FullScreenImageItem(imgUrl: String) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .transformable(transformState),
+            .transformable(
+                state = transformState,
+                canPan = { scale > 1f }
+            ),
         contentAlignment = Alignment.Center
     ) {
         AsyncImage(

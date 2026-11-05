@@ -15,5 +15,8 @@ data class User(
     val isOnline: Boolean = false,
     val lastSeenAt: Any? = null,
     val storyNote: String = "",
-    val storyNoteExpiresAt: Long = 0L
+    val storyNoteExpiresAt: Long = 0L,
+    val storyNoteCreatedAt: Long = 0L,
+    val storyNoteViewedBy: List<String> = emptyList(),
+    val storyNoteLovedBy: List<String> = emptyList()
 )
