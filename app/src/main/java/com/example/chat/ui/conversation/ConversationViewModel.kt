@@ -160,6 +160,40 @@ class ConversationViewModel(
         _uiState.update { it.copy(replyingToMessage = message) }
     }
 
+    fun reactToMessage(messageId: String, emoji: String) {
+        if (messageId.isBlank() || currentUserId.isBlank()) return
+
+        viewModelScope.launch {
+            try {
+                val messageRef = firestore.collection("conversations")
+                    .document(conversationId)
+                    .collection("messages")
+                    .document(messageId)
+                firestore.runTransaction { transaction ->
+                    val snapshot = transaction.get(messageRef)
+                    val reactions = (snapshot.get("reactions") as? Map<*, *>)
+                        ?.mapNotNull { (userId, reaction) ->
+                            val uid = userId as? String
+                            val value = reaction as? String
+                            if (uid != null && value != null) uid to value else null
+                        }
+                        ?.toMap()
+                        ?.toMutableMap()
+                        ?: mutableMapOf()
+
+                    if (reactions[currentUserId] == emoji) {
+                        reactions.remove(currentUserId)
+                    } else {
+                        reactions[currentUserId] = emoji
+                    }
+                    transaction.update(messageRef, "reactions", reactions)
+                }.await()
+            } catch (error: Exception) {
+                android.util.Log.e("ConversationViewModel", "Failed to react to message", error)
+            }
+        }
+    }
+
     fun sendMessage() {
         val text = uiState.value.messageInput.trim()
         if (text.isBlank() || currentUserId.isBlank()) return

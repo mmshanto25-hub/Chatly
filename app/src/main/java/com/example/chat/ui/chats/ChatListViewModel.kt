@@ -8,6 +8,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.chat.core.utils.CloudinaryUploader
 import com.example.chat.core.utils.FcmTokenManager
+import com.example.chat.data.local.NotificationLocalManager
 import com.example.chat.data.local.SavedAccountManager
 import com.example.chat.data.model.AppNotification
 import com.example.chat.data.model.Conversation
@@ -204,6 +205,14 @@ class ChatListViewModel : ViewModel() {
                 if (snapshot != null) {
                     val notifications = snapshot.documents
                         .mapNotNull { it.toObject(AppNotification::class.java)?.copy(notificationId = it.id) }
+                        .map { notification ->
+                            val isLocallyRead = NotificationLocalManager.isNotificationRead(
+                                userId = currentUserId,
+                                notificationId = notification.notificationId,
+                                createdAt = notification.createdAt
+                            )
+                            if (isLocallyRead) notification.copy(isRead = true) else notification
+                        }
                         .sortedByDescending { it.createdAt }
                     _uiState.update { it.copy(notifications = notifications, notificationError = null) }
                 }
@@ -244,17 +253,27 @@ class ChatListViewModel : ViewModel() {
     }
 
     fun markAllNotificationsRead() {
-        val unread = _uiState.value.notifications.filterNot { it.isRead }
-        if (unread.isEmpty()) return
-        val unreadIds = unread.mapTo(HashSet()) { it.notificationId }
+        if (currentUserId.isBlank()) return
+        val currentNotifications = _uiState.value.notifications
+        val unread = currentNotifications.filterNot { it.isRead }
+
+        // Persist read state in SharedPreferences
+        NotificationLocalManager.markAllRead(
+            userId = currentUserId,
+            notifications = currentNotifications
+        )
+
+        // Set all to read in UI state immediately (badge becomes 0)
         _uiState.update { state ->
             state.copy(
-                notifications = state.notifications.map { notification ->
-                    if (notification.notificationId in unreadIds) notification.copy(isRead = true) else notification
-                },
+                notifications = state.notifications.map { it.copy(isRead = true) },
                 notificationError = null
             )
         }
+
+        if (unread.isEmpty()) return
+
+        // Sync read state to Firestore in background without reverting local state on error
         viewModelScope.launch {
             try {
                 val firestore = FirebaseFirestore.getInstance()
@@ -270,15 +289,35 @@ class ChatListViewModel : ViewModel() {
                     batch.commit().await()
                 }
             } catch (error: Exception) {
-                Log.e("ChatListViewModel", "Failed to mark notifications as read", error)
-                _uiState.update { state ->
-                    state.copy(
-                        notifications = state.notifications.map { notification ->
-                            if (notification.notificationId in unreadIds) notification.copy(isRead = false) else notification
-                        },
-                        notificationError = error.localizedMessage ?: "Couldn't update notifications."
-                    )
+                Log.w("ChatListViewModel", "Failed to sync notifications read status to Firestore (local state preserved)", error)
+            }
+        }
+    }
+
+    fun markNotificationAsRead(notificationId: String) {
+        if (notificationId.isBlank() || currentUserId.isBlank()) return
+        NotificationLocalManager.markNotificationRead(
+            userId = currentUserId,
+            notificationId = notificationId
+        )
+        _uiState.update { state ->
+            state.copy(
+                notifications = state.notifications.map {
+                    if (it.notificationId == notificationId) it.copy(isRead = true) else it
                 }
+            )
+        }
+        viewModelScope.launch {
+            try {
+                FirebaseFirestore.getInstance()
+                    .collection("users")
+                    .document(currentUserId)
+                    .collection("notifications")
+                    .document(notificationId)
+                    .update("isRead", true)
+                    .await()
+            } catch (error: Exception) {
+                Log.w("ChatListViewModel", "Failed to sync notification $notificationId to Firestore", error)
             }
         }
     }
@@ -378,32 +417,171 @@ class ChatListViewModel : ViewModel() {
         val note = text.trim().take(MAX_STORY_NOTE_LENGTH)
         viewModelScope.launch {
             try {
+                val now = System.currentTimeMillis()
                 val expiresAt = if (note.isBlank()) 0L else {
-                    System.currentTimeMillis() + STORY_NOTE_DURATION_MS
+                    now + STORY_NOTE_DURATION_MS
                 }
+                val updateMap = mutableMapOf<String, Any>(
+                    "storyNote" to note,
+                    "storyNoteExpiresAt" to expiresAt,
+                    "storyNoteCreatedAt" to if (note.isBlank()) 0L else now,
+                    "storyNoteViewedBy" to emptyList<String>(),
+                    "storyNoteLovedBy" to emptyList<String>()
+                )
                 FirebaseFirestore.getInstance()
                     .collection("users")
                     .document(currentUserId)
-                    .update(
-                        mapOf(
-                            "storyNote" to note,
-                            "storyNoteExpiresAt" to expiresAt
-                        )
-                    )
+                    .update(updateMap)
                     .await()
                 _uiState.update { state ->
                     val user = state.currentUser
+                    val updatedUser = user?.copy(
+                        storyNote = note,
+                        storyNoteExpiresAt = expiresAt,
+                        storyNoteCreatedAt = if (note.isBlank()) 0L else now,
+                        storyNoteViewedBy = emptyList(),
+                        storyNoteLovedBy = emptyList()
+                    )
                     state.copy(
-                        currentUser = user?.copy(
-                            storyNote = note,
-                            storyNoteExpiresAt = expiresAt
-                        )
+                        currentUser = updatedUser,
+                        usersMap = if (updatedUser != null) state.usersMap + (currentUserId to updatedUser) else state.usersMap
                     )
                 }
             } catch (error: Exception) {
                 Log.e("ChatListViewModel", "Failed to update story note", error)
                 onError(error.localizedMessage ?: "Couldn't update your note.")
             }
+        }
+    }
+
+    fun recordStoryNoteView(targetUserId: String) {
+        if (currentUserId.isBlank() || targetUserId.isBlank() || targetUserId == currentUserId) return
+        val targetUser = _uiState.value.usersMap[targetUserId] ?: return
+        if (currentUserId in targetUser.storyNoteViewedBy) return
+
+        val newViewedBy = (targetUser.storyNoteViewedBy + currentUserId).distinct()
+        _uiState.update { state ->
+            val updatedUser = targetUser.copy(storyNoteViewedBy = newViewedBy)
+            state.copy(usersMap = state.usersMap + (targetUserId to updatedUser))
+        }
+        viewModelScope.launch {
+            try {
+                FirebaseFirestore.getInstance()
+                    .collection("users")
+                    .document(targetUserId)
+                    .update("storyNoteViewedBy", FieldValue.arrayUnion(currentUserId))
+                    .await()
+            } catch (e: Exception) {
+                Log.w("ChatListViewModel", "Failed to update storyNoteViewedBy in Firestore", e)
+            }
+        }
+    }
+
+    fun toggleStoryNoteLove(targetUserId: String, noteText: String) {
+        if (currentUserId.isBlank() || targetUserId.isBlank()) return
+        val targetUser = _uiState.value.usersMap[targetUserId] ?: return
+        val isLoved = currentUserId in targetUser.storyNoteLovedBy
+        val newLovedBy = if (isLoved) {
+            targetUser.storyNoteLovedBy - currentUserId
+        } else {
+            (targetUser.storyNoteLovedBy + currentUserId).distinct()
+        }
+        _uiState.update { state ->
+            val updatedUser = targetUser.copy(storyNoteLovedBy = newLovedBy)
+            state.copy(usersMap = state.usersMap + (targetUserId to updatedUser))
+        }
+        viewModelScope.launch {
+            try {
+                val operation = if (isLoved) {
+                    FieldValue.arrayRemove(currentUserId)
+                } else {
+                    FieldValue.arrayUnion(currentUserId)
+                }
+                FirebaseFirestore.getInstance()
+                    .collection("users")
+                    .document(targetUserId)
+                    .update("storyNoteLovedBy", operation)
+                    .await()
+
+                if (!isLoved && targetUserId != currentUserId) {
+                    createNotification(
+                        recipientId = targetUserId,
+                        type = "message",
+                        message = "reacted ❤️ to your note: \"\""
+                    )
+                }
+            } catch (e: Exception) {
+                Log.w("ChatListViewModel", "Failed to update storyNoteLovedBy in Firestore", e)
+            }
+        }
+    }
+
+    fun replyToStoryNote(
+        recipientUser: User,
+        noteText: String,
+        replyMessage: String,
+        onError: (String) -> Unit
+    ) {
+        val trimmedText = replyMessage.trim()
+        if (currentUserId.isBlank() || trimmedText.isBlank()) return
+        viewModelScope.launch {
+            val name = recipientUser.displayName.ifBlank { recipientUser.username }.ifBlank { "User" }
+            val conversationResult = chatRepository.getOrCreateConversation(
+                currentUserId = currentUserId,
+                recipientId = recipientUser.uid,
+                recipientName = name,
+                recipientPhoto = recipientUser.photoUrl
+            )
+            val conversationId = conversationResult.getOrElse {
+                onError(it.localizedMessage ?: "Couldn't open the conversation.")
+                return@launch
+            }
+            val messageResult = chatRepository.sendMessage(
+                conversationId = conversationId,
+                senderId = currentUserId,
+                text = trimmedText,
+                replyToText = noteText,
+                replyToSenderName = name
+            )
+            messageResult.fold(
+                onSuccess = {
+                    createNotification(
+                        recipientId = recipientUser.uid,
+                        type = "message",
+                        message = trimmedText,
+                        conversationId = conversationId
+                    )
+                },
+                onFailure = { error ->
+                    onError(error.localizedMessage ?: "Couldn't send your message.")
+                }
+            )
+        }
+    }
+
+    fun openConversationWithUser(
+        recipientUser: User,
+        onConversationReady: (String) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        if (currentUserId.isBlank() || recipientUser.uid.isBlank()) {
+            onError("Couldn't open this conversation.")
+            return
+        }
+        viewModelScope.launch {
+            val name = recipientUser.displayName.ifBlank { recipientUser.username }.ifBlank { "User" }
+            val result = chatRepository.getOrCreateConversation(
+                currentUserId = currentUserId,
+                recipientId = recipientUser.uid,
+                recipientName = name,
+                recipientPhoto = recipientUser.photoUrl
+            )
+            result.fold(
+                onSuccess = onConversationReady,
+                onFailure = { error ->
+                    onError(error.localizedMessage ?: "Couldn't open the conversation.")
+                }
+            )
         }
     }
 
@@ -416,6 +594,40 @@ class ChatListViewModel : ViewModel() {
                     .await()
             } catch (error: Exception) {
                 Log.e("ChatListViewModel", "Failed to mark story as viewed", error)
+            }
+        }
+    }
+
+    fun deleteStory(
+        story: Story,
+        keepInHighlights: Boolean,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        if (currentUserId.isBlank() || story.userId != currentUserId) {
+            onError("You can only delete your own stories.")
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val storyRef = FirebaseFirestore.getInstance()
+                    .collection("stories")
+                    .document(story.storyId)
+                if (keepInHighlights) {
+                    storyRef.update("expiresAt", System.currentTimeMillis()).await()
+                } else {
+                    val comments = storyRef.collection("comments").get().await()
+                    comments.documents.chunked(450).forEach { documents ->
+                        val batch = FirebaseFirestore.getInstance().batch()
+                        documents.forEach { document -> batch.delete(document.reference) }
+                        batch.commit().await()
+                    }
+                    storyRef.delete().await()
+                }
+                onSuccess()
+            } catch (error: Exception) {
+                Log.e("ChatListViewModel", "Failed to delete story", error)
+                onError(error.localizedMessage ?: "Couldn't delete the story.")
             }
         }
     }

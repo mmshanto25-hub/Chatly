@@ -61,6 +61,7 @@ import com.example.chat.data.model.Story
 import com.example.chat.data.model.StoryComment
 import com.example.chat.data.model.User
 import com.example.chat.ui.chats.UserStories
+import com.example.chat.ui.conversation.RecipientProfileDialog
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.delay
@@ -87,8 +88,18 @@ fun ChatListScreen(
     val onlineUserIds = uiState.usersMap.values
         .filter { it.uid != currentUserId && it.isCurrentlyOnline(now) }
         .mapTo(HashSet()) { it.uid }
+    val noteUserIds = uiState.usersMap.values
+        .filter {
+            it.uid != currentUserId &&
+                it.storyNote.isNotBlank() &&
+                it.storyNoteExpiresAt > now
+        }
+        .mapTo(HashSet()) { it.uid }
     val onlineUsersWithoutStories = uiState.usersMap.values
-        .filter { it.uid in onlineUserIds && it.uid !in storyUserIds }
+        .filter {
+            it.uid !in storyUserIds &&
+                (it.uid in onlineUserIds || it.uid in noteUserIds)
+        }
         .sortedWith(
             compareByDescending<User> { it.lastSeenTimeMillis() }
                 .thenBy { it.displayName.lowercase(Locale.getDefault()) }
@@ -134,10 +145,30 @@ fun ChatListScreen(
     var openStoryCommentsOnLaunch by remember { mutableStateOf(false) }
     var notificationCommentId by remember { mutableStateOf("") }
     var storyForViewers by remember { mutableStateOf<Story?>(null) }
+    var profileUserId by remember { mutableStateOf("") }
+    var profileUserName by remember { mutableStateOf("") }
+    var showUserProfile by remember { mutableStateOf(false) }
+
+    LaunchedEffect(showNotifications) {
+        if (showNotifications) {
+            viewModel.markAllNotificationsRead()
+        }
+    }
 
     fun closeNotifications() {
         showNotifications = false
         viewModel.markAllNotificationsRead()
+    }
+
+    fun openUserProfile(userId: String, userName: String) {
+        if (userId.isBlank()) return
+        if (userId == currentUserId) {
+            onNavToProfile()
+        } else {
+            profileUserId = userId
+            profileUserName = userName
+            showUserProfile = true
+        }
     }
 
     val storyPickerLauncher = rememberLauncherForActivityResult(
@@ -308,7 +339,10 @@ fun ChatListScreen(
                 myStoryNoteExpiresAt = uiState.usersMap[currentUserId]?.storyNoteExpiresAt
                     ?: uiState.currentUser?.storyNoteExpiresAt
                     ?: 0L,
+                myUser = uiState.usersMap[currentUserId] ?: uiState.currentUser,
                 users = uiState.usersMap.values.toList(),
+                usersMap = uiState.usersMap,
+                currentUserId = currentUserId,
                 activeStories = uiState.activeStories,
                 onlineUsersWithoutStories = onlineUsersWithoutStories,
                 onlineUserIds = onlineUserIds,
@@ -338,6 +372,36 @@ fun ChatListScreen(
                     activeViewingAllStories = combined
                     activeViewingUserIndex = userIdx
                     activeViewingStoryIndex = storyIdx
+                },
+                onReplyToNote = { recipientUser, noteText, replyMessage ->
+                    viewModel.replyToStoryNote(
+                        recipientUser = recipientUser,
+                        noteText = noteText,
+                        replyMessage = replyMessage,
+                        onError = { message ->
+                            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                        }
+                    )
+                },
+                onOpenConversation = { recipientUser ->
+                    viewModel.openConversationWithUser(
+                        recipientUser = recipientUser,
+                        onConversationReady = { conversationId ->
+                            val name = recipientUser.displayName.takeIf { it.isNotBlank() }
+                                ?: recipientUser.username.takeIf { it.isNotBlank() }
+                                ?: "User"
+                            onNavToChat(conversationId, recipientUser.uid, name)
+                        },
+                        onError = { message ->
+                            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                        }
+                    )
+                },
+                onToggleNoteLove = { targetUserId, noteText ->
+                    viewModel.toggleStoryNoteLove(targetUserId, noteText)
+                },
+                onRecordNoteView = { targetUserId ->
+                    viewModel.recordStoryNoteView(targetUserId)
                 }
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), thickness = 0.5.dp)
@@ -462,6 +526,36 @@ fun ChatListScreen(
                 )
             },
             onOpenInsights = { story -> storyForViewers = story },
+            onOpenUserProfile = ::openUserProfile,
+            onOpenConversation = { story ->
+                val recipient = uiState.usersMap[story.userId] ?: User(
+                    uid = story.userId,
+                    displayName = story.userName,
+                    photoUrl = story.userPhoto
+                )
+                viewModel.openConversationWithUser(
+                    recipientUser = recipient,
+                    onConversationReady = { conversationId ->
+                        activeViewingAllStories = null
+                        onNavToChat(conversationId, story.userId, story.userName)
+                    },
+                    onError = { message ->
+                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                    }
+                )
+            },
+            onDeleteStory = { story, keepInHighlights, onSuccess ->
+                viewModel.deleteStory(
+                    story = story,
+                    keepInHighlights = keepInHighlights,
+                    onSuccess = {
+                        onSuccess()
+                    },
+                    onError = { message ->
+                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                    }
+                )
+            },
             onDismiss = {
                 activeViewingAllStories = null
                 openStoryCommentsOnLaunch = false
@@ -469,6 +563,16 @@ fun ChatListScreen(
             }
         )
     }
+
+    RecipientProfileDialog(
+        isVisible = showUserProfile,
+        recipientId = profileUserId,
+        recipientName = profileUserName,
+        currentUserId = currentUserId,
+        chatListViewModel = viewModel,
+        onNavToChat = onNavToChat,
+        onDismiss = { showUserProfile = false }
+    )
 
     storyForViewers?.let { story ->
         StoryViewersBottomSheet(
@@ -484,6 +588,7 @@ fun ChatListScreen(
             error = uiState.notificationError,
             onDismiss = ::closeNotifications,
             onOpenNotification = { notification ->
+                viewModel.markNotificationAsRead(notification.notificationId)
                 when {
                     notification.storyId.isNotBlank() -> {
                         viewModel.loadStoryForNotification(

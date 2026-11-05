@@ -58,7 +58,6 @@ fun ProfileScreen(
     var profilePictures by remember { mutableStateOf<List<String>>(emptyList()) }
     var coverPictures by remember { mutableStateOf<List<String>>(emptyList()) }
     var selectedGalleryFolder by remember { mutableStateOf("all") }
-    var isGridView by remember { mutableStateOf(true) }
     var isSaving by remember { mutableStateOf(false) }
     var saveMessage by remember { mutableStateOf<String?>(null) }
     var fullScreenImageIndex by remember { mutableStateOf<Int?>(null) }
@@ -369,46 +368,6 @@ fun ProfileScreen(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Gallery (${displayedGalleryImages.size})",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp
-                    )
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Button(
-                            onClick = { isGridView = true },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isGridView) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                contentColor = if (isGridView) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                            ),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                            modifier = Modifier.height(32.dp)
-                        ) {
-                            Text("Grid", fontSize = 12.sp)
-                        }
-                        Button(
-                            onClick = { isGridView = false },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (!isGridView) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                contentColor = if (!isGridView) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                            ),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                            modifier = Modifier.height(32.dp)
-                        ) {
-                            Text("List", fontSize = 12.sp)
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
                 if (displayedGalleryImages.isEmpty()) {
                     Box(
                         modifier = Modifier
@@ -418,7 +377,7 @@ fun ProfileScreen(
                     ) {
                         Text("No photos in this folder yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                } else if (isGridView) {
+                } else {
                     val chunked = displayedGalleryImages.chunked(3)
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         chunked.forEach { rowImages ->
@@ -459,38 +418,6 @@ fun ProfileScreen(
                                 }
                                 repeat(3 - rowImages.size) {
                                     Spacer(modifier = Modifier.weight(1f))
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        displayedGalleryImages.forEachIndexed { index, imgUrl ->
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(180.dp)
-                                    .clickable { fullScreenImageIndex = index }
-                            ) {
-                                Box {
-                                    AsyncImage(
-                                        model = imgUrl,
-                                        contentDescription = "Gallery Photo",
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Crop
-                                    )
-                                    if (imgUrl == photoUrl) {
-                                        Surface(
-                                            modifier = Modifier
-                                                .align(Alignment.TopEnd)
-                                                .padding(8.dp)
-                                                .clip(RoundedCornerShape(8.dp)),
-                                            color = MaterialTheme.colorScheme.primary
-                                        ) {
-                                            Text("Active Profile Photo", color = MaterialTheme.colorScheme.onPrimary, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
-                                        }
-                                    }
                                 }
                             }
                         }

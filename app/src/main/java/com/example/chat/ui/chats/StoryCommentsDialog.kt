@@ -76,6 +76,7 @@ private fun StoryCommentRow(
     viewerId: String,
     modifier: Modifier = Modifier,
     onReply: (StoryComment) -> Unit,
+    onOpenUserProfile: (userId: String, userName: String) -> Unit,
     onLove: () -> Unit
 ) {
     Row(
@@ -93,7 +94,10 @@ private fun StoryCommentRow(
         Surface(
             modifier = Modifier
                 .size(36.dp)
-                .clip(CircleShape),
+                .clip(CircleShape)
+                .clickable {
+                    onOpenUserProfile(comment.senderId, comment.senderName.ifBlank { "User" })
+                },
             color = MaterialTheme.colorScheme.secondaryContainer
         ) {
             if (comment.senderPhoto.isNotBlank()) {
@@ -118,6 +122,9 @@ private fun StoryCommentRow(
         ) {
             Text(
                 text = comment.senderName.ifBlank { "User" },
+                modifier = Modifier.clickable {
+                    onOpenUserProfile(comment.senderId, comment.senderName.ifBlank { "User" })
+                },
                 fontWeight = FontWeight.SemiBold
             )
             if (replyToName != null) {
@@ -189,7 +196,8 @@ fun StoryCommentsDialog(
     onDraftChange: (String) -> Unit,
     onToggleCommentLove: (String, StoryComment) -> Unit,
     onSendComment: (String, String, String, List<String>, () -> Unit) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onOpenUserProfile: (userId: String, userName: String) -> Unit = { _, _ -> }
 ) {
     var replyTarget by remember(storyId) { mutableStateOf<StoryComment?>(null) }
     var showMentionPicker by remember(storyId) { mutableStateOf(false) }
@@ -267,6 +275,7 @@ fun StoryCommentsDialog(
                                     isFocused = rootComment.commentId == focusRootCommentId,
                                     replyToName = null,
                                     viewerId = viewerId,
+                                    onOpenUserProfile = onOpenUserProfile,
                                     onReply = { comment ->
                                         replyTarget?.senderId
                                             ?.takeIf { it != comment.senderId }
@@ -293,6 +302,7 @@ fun StoryCommentsDialog(
                                             replyToName = replyTo.senderName.ifBlank { "comment" },
                                             viewerId = viewerId,
                                             modifier = Modifier.padding(start = 32.dp),
+                                            onOpenUserProfile = onOpenUserProfile,
                                             onReply = { comment ->
                                                 replyTarget?.senderId
                                                     ?.takeIf { it != comment.senderId }

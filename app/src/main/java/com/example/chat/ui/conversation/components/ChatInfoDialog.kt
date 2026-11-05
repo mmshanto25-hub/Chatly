@@ -30,7 +30,7 @@ fun ChatInfoDialog(
     onOpenCreateGroup: () -> Unit,
     onMediaClick: (String, String) -> Unit
 ) {
-    var selectedTab by remember { mutableStateOf(0) } // 0: Shared Media, 1: Chat Options
+    var selectedTab by remember { mutableStateOf(0) }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -42,103 +42,165 @@ fun ChatInfoDialog(
         ) {
             Scaffold(
                 topBar = {
-                    TopAppBar(
-                        title = { Text(recipientName, fontWeight = FontWeight.Bold) },
-                        navigationIcon = {
-                            IconButton(onClick = onDismiss) {
-                                Icon(Icons.Default.Close, contentDescription = "Close")
-                            }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
-                    )
+                    if (selectedTab == 1) {
+                        TopAppBar(
+                            title = { Text(recipientName, fontWeight = FontWeight.Bold) },
+                            navigationIcon = {
+                                IconButton(onClick = onDismiss) {
+                                    Icon(Icons.Default.Close, contentDescription = "Close")
+                                }
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer
+                            )
+                        )
+                    }
                 }
             ) { padding ->
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding)
-                ) {
+                if (selectedTab == 0) {
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f))
-                            .padding(16.dp),
-                        contentAlignment = Alignment.Center
+                            .fillMaxSize()
+                            .padding(padding)
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Surface(
-                                modifier = Modifier.size(80.dp),
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.primaryContainer
-                            ) {
-                                if (recipientPhoto.isNotBlank()) {
-                                    AsyncImage(model = recipientPhoto, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                                } else {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Text(recipientName.take(1).uppercase(), fontSize = 32.sp, fontWeight = FontWeight.Bold)
+                        SharedMediaFolderGallery(
+                            messages = messages,
+                            onMediaClick = onMediaClick,
+                            headerContent = {
+                                item(key = "chat-info-title") {
+                                    TopAppBar(
+                                        title = { Text(recipientName, fontWeight = FontWeight.Bold) },
+                                        navigationIcon = {
+                                            IconButton(onClick = onDismiss) {
+                                                Icon(Icons.Default.Close, contentDescription = "Close")
+                                            }
+                                        },
+                                        colors = TopAppBarDefaults.topAppBarColors(
+                                            containerColor = MaterialTheme.colorScheme.primaryContainer
+                                        )
+                                    )
+                                }
+                                item(key = "chat-info-profile") {
+                                    ChatInfoProfileHeader(recipientName, recipientPhoto)
+                                }
+                                item(key = "chat-info-tabs") {
+                                    TabRow(selectedTabIndex = selectedTab) {
+                                        Tab(
+                                            selected = selectedTab == 0,
+                                            onClick = { selectedTab = 0 },
+                                            text = { Text("Shared Media") }
+                                        )
+                                        Tab(
+                                            selected = selectedTab == 1,
+                                            onClick = { selectedTab = 1 },
+                                            text = { Text("Chat Options") }
+                                        )
                                     }
                                 }
                             }
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(text = recipientName, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                        )
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(padding)
+                    ) {
+                        ChatInfoProfileHeader(recipientName, recipientPhoto)
+
+                        TabRow(selectedTabIndex = selectedTab) {
+                            Tab(
+                                selected = selectedTab == 0,
+                                onClick = { selectedTab = 0 },
+                                text = { Text("Shared Media") }
+                            )
+                            Tab(
+                                selected = selectedTab == 1,
+                                onClick = { selectedTab = 1 },
+                                text = { Text("Chat Options") }
+                            )
                         }
-                    }
 
-                    TabRow(selectedTabIndex = selectedTab) {
-                        Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Shared Media") })
-                        Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("Chat Options") })
-                    }
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(24.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Text("Chat Settings & Options", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                            Spacer(modifier = Modifier.height(8.dp))
 
-                    Box(modifier = Modifier.fillMaxSize().weight(1f)) {
-                        when (selectedTab) {
-                            0 -> {
-                                SharedMediaFolderGallery(messages = messages, onMediaClick = onMediaClick)
+                            Button(
+                                onClick = {
+                                    onDismiss()
+                                    onOpenNickname()
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("✏️ Edit Nickname")
                             }
-                            1 -> {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(24.dp),
-                                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    Text("Chat Settings & Options", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                                    Spacer(modifier = Modifier.height(8.dp))
 
-                                    Button(
-                                        onClick = {
-                                            onDismiss()
-                                            onOpenNickname()
-                                        },
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Text("✏️ Edit Nickname")
-                                    }
+                            Button(
+                                onClick = {
+                                    onDismiss()
+                                    onOpenTheme()
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("🎨 Change Chat Theme")
+                            }
 
-                                    Button(
-                                        onClick = {
-                                            onDismiss()
-                                            onOpenTheme()
-                                        },
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Text("🎨 Change Chat Theme")
-                                    }
-
-                                    Button(
-                                        onClick = {
-                                            onDismiss()
-                                            onOpenCreateGroup()
-                                        },
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Text("👥 Create Group with $recipientName")
-                                    }
-                                }
+                            Button(
+                                onClick = {
+                                    onDismiss()
+                                    onOpenCreateGroup()
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("👥 Create Group with $recipientName")
                             }
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ChatInfoProfileHeader(recipientName: String, recipientPhoto: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f))
+            .padding(16.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Surface(
+                modifier = Modifier.size(80.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primaryContainer
+            ) {
+                if (recipientPhoto.isNotBlank()) {
+                    AsyncImage(
+                        model = recipientPhoto,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            recipientName.take(1).uppercase(),
+                            fontSize = 32.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(text = recipientName, fontWeight = FontWeight.Bold, fontSize = 20.sp)
         }
     }
 }
