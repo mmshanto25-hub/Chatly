@@ -1,6 +1,7 @@
 package com.example.chat.data.local
 
 import android.content.Context
+import androidx.core.content.edit
 import com.example.chat.ChatApplication
 import com.example.chat.data.model.AppNotification
 
@@ -70,10 +71,10 @@ object NotificationLocalManager {
         val existingLastRead = prefs.getLong(KEY_LAST_READ_TIMESTAMP, 0L)
         val finalLastReadTimestamp = maxOf(existingLastRead, newLastReadTimestamp)
 
-        prefs.edit()
-            .putStringSet(KEY_READ_IDS, updatedIds)
-            .putLong(KEY_LAST_READ_TIMESTAMP, finalLastReadTimestamp)
-            .apply()
+        prefs.edit {
+            putStringSet(KEY_READ_IDS, updatedIds)
+            putLong(KEY_LAST_READ_TIMESTAMP, finalLastReadTimestamp)
+        }
     }
 
     fun markNotificationRead(
@@ -85,8 +86,8 @@ object NotificationLocalManager {
         val prefs = getPrefs(context, userId)
         val existingIds = prefs.getStringSet(KEY_READ_IDS, emptySet()) ?: emptySet()
         val updatedIds = HashSet(existingIds).apply { add(notificationId) }
-        prefs.edit()
-            .putStringSet(KEY_READ_IDS, updatedIds)
-            .apply()
+        prefs.edit {
+            putStringSet(KEY_READ_IDS, updatedIds)
+        }
     }
 }

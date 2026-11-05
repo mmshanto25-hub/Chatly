@@ -292,17 +292,18 @@ fun RecipientProfileDialog(
                                 }
                             } else {
                                 val rows = displayedPics.chunked(3)
-                                items(rows) { rowImages ->
+                                items(rows.size) { rowIndex ->
+                                    val rowImages = rows[rowIndex]
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .padding(vertical = 4.dp),
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        for (imgUrl in rowImages) {
-                                        val originalIndex = displayedPics.indexOf(imgUrl)
+                                        for ((columnIndex, imgUrl) in rowImages.withIndex()) {
+                                            val originalIndex = rowIndex * 3 + columnIndex
                                             Box(
-                                            modifier = Modifier
+                                                modifier = Modifier
                                                     .weight(1f)
                                                     .aspectRatio(1f)
                                                     .clip(RoundedCornerShape(8.dp))

@@ -11,6 +11,7 @@ import android.os.Environment
 import android.text.format.DateFormat
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.core.net.toUri
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -290,8 +291,8 @@ fun ConversationMessageList(
                                         .pointerInput(msg.messageId) {
                                             detectTapGestures(
                                                 onTap = {
-                                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(msg.attachmentUrl)).apply {
-                                                        setDataAndType(Uri.parse(msg.attachmentUrl), "video/*")
+                                                    val intent = Intent(Intent.ACTION_VIEW, msg.attachmentUrl.toUri()).apply {
+                                                        setDataAndType(msg.attachmentUrl.toUri(), "video/*")
                                                     }
                                                     try {
                                                         context.startActivity(intent)

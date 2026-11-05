@@ -1,11 +1,11 @@
 package com.example.chat.ui.chats
 
-import android.net.Uri
 import android.text.format.DateFormat
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.net.toUri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -222,7 +222,7 @@ fun FullStoryViewerDialog(
                         AndroidView(
                             factory = { ctx ->
                                 android.widget.VideoView(ctx).apply {
-                                    setVideoURI(Uri.parse(liveStory.mediaUrl))
+                                    setVideoURI(liveStory.mediaUrl.toUri())
                                     setOnPreparedListener { mp ->
                                         mp.isLooping = false
                                         start()

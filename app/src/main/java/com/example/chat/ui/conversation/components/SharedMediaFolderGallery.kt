@@ -1,10 +1,10 @@
 package com.example.chat.ui.conversation.components
 
 import android.media.MediaPlayer
-import android.net.Uri
 import android.widget.VideoView
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.core.net.toUri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -501,7 +501,7 @@ private fun SharedMediaVideoPlayer(url: String, isActive: Boolean) {
             factory = { viewContext ->
                 VideoView(viewContext).also { view ->
                     videoView = view
-                    view.setVideoURI(Uri.parse(url))
+                    view.setVideoURI(url.toUri())
                     view.setOnPreparedListener { player ->
                         player.isLooping = true
                         isPrepared = true
